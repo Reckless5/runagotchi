@@ -309,7 +309,7 @@ async function onSession(uid) {
   }
   setGuest(false);
   screen = 'boot'; render();
-  const { data: prof, error } = await sb.from('profiles').select('id,username').eq('id', uid).maybeSingle();
+  const { data: prof, error } = await sb.from('profiles').select('*').eq('id', uid).maybeSingle();
   if (uid !== currentUid) return;
   if (error) { screen = 'error'; return render(); }
   if (!prof) { profile = { id: uid, username: null }; screen = 'username'; return render(); }
@@ -863,14 +863,16 @@ function renderRun() {
     <div class="scene ${sky.night ? 'night' : ''}" style="background:${sky.bg}">
       ${sky.orb}
       ${sceneLayers(sky.night)}
+      <button class="scene-title" id="renamePack2" aria-label="Rename your running group">${esc(packName())} <span>✏️</span></button>
       ${n ? runnerHtml + linkHtml + tagHtml : ''}
       ${n <= 1 ? `<div class="scene-note">${!friends.loaded && !friends.error ? 'Loading friends…' : 'Add friends to run together!'}</div>` : ''}
     </div>
     <p class="small muted center" style="margin:8px 0 14px">Strongest pets lead the pack, the weakest trail behind. Friends who ran together this week run side by side 🤝</p>
-    ${n ? `<section class="card"><h2>The pack <button class="btn small ghost" id="rrefresh">${friends.loading ? 'Loading…' : 'Refresh'}</button></h2><ol class="pack">${rows}</ol>
+    ${n ? `<section class="card"><h2><span class="packname">${esc(packName())} <button class="linkbtn rename" id="renamePack" aria-label="Rename your running group">✏️</button></span><button class="btn small ghost" id="rrefresh">${friends.loading ? 'Loading…' : 'Refresh'}</button></h2><ol class="pack">${rows}</ol>
       ${n === 1 ? `<div class="empty">Only you so far. <button class="linkbtn" id="goFriends">Add friends</button></div>` : ''}</section>` : ''}`;
   bindHeader();
   if ($('#rrefresh')) $('#rrefresh').onclick = loadFriends;
+  ['#renamePack', '#renamePack2'].forEach(sel => { if ($(sel)) $(sel).onclick = openRenamePack; });
   if ($('#goFriends')) $('#goFriends').onclick = () => { tab = 'friends'; render(); };
 }
 
@@ -1310,6 +1312,35 @@ function bindIncoming() {
     await persistAddRuns([run]);
     if (acceptedFriendIds().includes(t.owner_id)) await saveRunBuddies(run.id, [t.owner_id], []);
     toast(`Logged! You and <b>@${esc(unameOf(t.owner_id))}</b> ran together this week 🤝`);
+  });
+}
+
+/* ============ running group name ============ */
+const packName = () => (profile && profile.pack_name) || 'The pack';
+function openRenamePack() {
+  openSheet(`<h3>Name your running group</h3>
+    <p class="small muted" style="margin-top:0">Shown above your pack in the Run tab. Only you see your group's name, because everyone's pack is made of their own friends.</p>
+    <input id="pn" class="text" maxlength="30" autocomplete="off" placeholder="The pack" value="${esc((profile && profile.pack_name) || '')}">
+    <div class="small muted" style="margin-top:6px">Up to 30 characters. Leave empty for "The pack".</div>
+    <div class="err" id="pnerr"></div>
+    <div class="grid2" style="margin-top:8px"><button class="btn" id="pnx">Cancel</button><button class="btn primary" id="pns">Save</button></div>`, el => {
+    const inp = el.querySelector('#pn'); setTimeout(() => { inp.focus(); inp.select(); }, 50);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') el.querySelector('#pns').click(); });
+    el.querySelector('#pnx').onclick = closeSheet;
+    el.querySelector('#pns').onclick = async () => {
+      const name = inp.value.trim().replace(/\s+/g, ' ') || null;
+      if (name && name.length > 30) { el.querySelector('#pnerr').textContent = 'Use 30 characters or fewer.'; return; }
+      const btn = el.querySelector('#pns'); btn.disabled = true;
+      const { error } = await sb.from('profiles').update({ pack_name: name }).eq('id', profile.id);
+      btn.disabled = false;
+      if (error) {
+        el.querySelector('#pnerr').textContent = /pack_name/.test(error.message || '') ? 'Almost: run supabase/006_pack_name.sql in Supabase first.' : "Couldn't save. Try again.";
+        return;
+      }
+      profile = { ...profile, pack_name: name };
+      closeSheet(); render();
+      toast(name ? `Your running group is now <b>${esc(name)}</b>.` : 'Back to "The pack".');
+    };
   });
 }
 
