@@ -909,7 +909,7 @@ function renderRun() {
   const lead = (left + right) / 2 + span * per / 2;                    // keep the pack centred in its space
   const pos = i => lead - units[i] * per;
   const cartX = !riders.length ? null : n ? Math.max(2 + cartPct / 2, lead - span * per - 7 - cartPct / 2) : 50;
-  // Every runner (not fainted or starved) pulls the cart.
+  // The cart rolls as long as at least one runner (not fainted or starved) is healthy.
   const pullers = riders.length ? list.map((x, i) => i).filter(i => !['dead', 'fainting'].includes(list[i].mood)) : [];
   const cartHtml = riders.length ? `<div class="cart ${pullers.length ? '' : 'parked'}" style="left:${cartX}%;width:${cartW}px;--rw:${riderW}px">
       <div class="riders">${riders.map(x => `<div class="rider">${petSVG(x.pet, x.mood, x.stage, 'c' + x.key.slice(0, 8))}</div>`).join('')}</div>
@@ -923,7 +923,7 @@ function renderRun() {
     const lane = LANES[laneIdx[i] % 3];
     const w = Math.round(base * lane.s);
     const spd = (0.75 - Math.max(0, x.strength) / 100 * 0.4).toFixed(2);
-    return `<div class="runner ${x.me ? 'me' : ''} ${x.mood}" ${pullers.includes(i) ? 'data-puller="1"' : ''} style="left:${pos(i)}%;bottom:${lane.b}px;width:${w}px;z-index:${lane.z + 10};--spd:${spd}s">
+    return `<div class="runner ${x.me ? 'me' : ''} ${x.mood}" style="left:${pos(i)}%;bottom:${lane.b}px;width:${w}px;z-index:${lane.z + 10};--spd:${spd}s">
       ${x.mood !== 'dead' && x.mood !== 'fainting' && x.strength >= 70 ? '<div class="dust"><i></i><i></i><i></i></div>' : ''}
       ${petSVG(x.pet, x.mood, x.stage, 'r' + x.key.slice(0, 8), true)}
     </div>`;
@@ -963,7 +963,6 @@ function renderRun() {
       ${sceneLayers(sky.night)}
       <button class="scene-title" id="renamePack2" aria-label="Rename your running group">${esc(packName())} <span>✏️</span></button>
       ${N ? runnerHtml + linkHtml + tagHtml + cartHtml + bubbleHtml : ''}
-      <svg class="ropes" aria-hidden="true"></svg>
       ${N <= 1 ? `<div class="scene-note">${!friends.loaded && !friends.error ? 'Loading friends…' : 'Add friends to run together!'}</div>` : ''}
     </div>
     ${N ? `<form class="say" id="sayForm"><input id="say" class="text" maxlength="80" autocomplete="off" placeholder="Say something to your pack…"><button class="btn primary" id="saySend">Send</button></form>
@@ -975,7 +974,6 @@ function renderRun() {
   if ($('#rrefresh')) $('#rrefresh').onclick = loadFriends;
   ['#renamePack', '#renamePack2'].forEach(sel => { if ($(sel)) $(sel).onclick = openRenamePack; });
   stackBubbles();
-  drawRopes();
   if ($('#sayForm')) $('#sayForm').onsubmit = e => { e.preventDefault(); sendMessage($('#say').value); };
   if ($('#sayClear')) $('#sayClear').onclick = clearMessage;
   if ($('#goFriends')) $('#goFriends').onclick = () => { tab = 'friends'; render(); };
@@ -1495,23 +1493,6 @@ function bindDebug() {
   });
 }
 
-
-/* ============ cart ropes ============ */
-// One line from the cart's handle to each pet pulling it (drawn after layout).
-function drawRopes() {
-  const scene = document.querySelector('.scene'), svg = scene && scene.querySelector('.ropes'), hitch = scene && scene.querySelector('.cart .hitch');
-  if (!svg) return;
-  svg.innerHTML = '';
-  if (!hitch) return;
-  const sr = scene.getBoundingClientRect(), h = hitch.getBoundingClientRect();
-  const x0 = h.left + h.width / 2 - sr.left, y0 = h.top + h.height / 2 - sr.top;
-  svg.setAttribute('viewBox', `0 0 ${sr.width} ${sr.height}`);
-  svg.innerHTML = [...scene.querySelectorAll('.runner[data-puller]')].map(el => {
-    // offset* ignores the running bounce, so the rope doesn't jump around
-    const x1 = el.offsetLeft - el.offsetWidth * 0.32, y1 = el.offsetTop + el.offsetHeight * 0.72;
-    return `<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="#8a5a3c" stroke-width="2" stroke-linecap="round"/>`;
-  }).join('');
-}
 
 /* ============ chat bubbles ============ */
 // Bubbles that would overlap get stacked upwards, left to right.
