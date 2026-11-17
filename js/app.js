@@ -108,7 +108,7 @@ function shade(hex, amt) {
   const m = v => Math.max(0, Math.min(255, Math.round(amt < 0 ? v * (1 + amt) : v + (255 - v) * amt)));
   return '#' + [m(r), m(g), m(b)].map(v => v.toString(16).padStart(2, '0')).join('');
 }
-function petSVG(p, mood, stage, id) {
+function petSVG(p, mood, stage, id, run = false) {
   const sh = SHAPES[p.shape] || SHAPES.blob;
   const dead = mood === 'dead';
   const col = dead ? '#d6d6d0' : (COLORS[p.color] || COLORS.tangerine);
@@ -156,12 +156,13 @@ function petSVG(p, mood, stage, id) {
   if (p.acc === 'cap') acc = `<path d="M${100 - 34} ${sh.top + 10}q34 -34 68 0z" fill="#2d4f9e"/><path d="M${100 + 30} ${sh.top + 8}q26 2 30 10q-16 2 -32 -2z" fill="#1f3a78"/><circle cx="100" cy="${sh.top - 7}" r="4" fill="#fff"/>`;
   if (p.acc === 'sprout') acc = `<path d="M100 ${sh.top + 2}v-18" stroke="#3f8f4f" stroke-width="4" stroke-linecap="round"/><path d="M100 ${sh.top - 14}q-18 -12 -24 2q14 8 24 -2z" fill="#5fbf6f"/><path d="M100 ${sh.top - 16}q16 -14 24 -2q-12 10 -24 2z" fill="#4caf5f"/>`;
   if (p.acc === 'bow') acc = `<g transform="translate(${100 + 26} ${sh.top + 10}) rotate(18)"><path d="M0 0l-16 -10v20z" fill="#ff4f8b"/><path d="M0 0l16 -10v20z" fill="#ff4f8b"/><circle r="5" fill="#e0306f"/></g>`;
-  const feet = dead ? '' : `<ellipse cx="78" cy="175" rx="14" ry="7" fill="${dark}"/><ellipse cx="122" cy="175" rx="14" ry="7" fill="${dark}"/>`;
+  const running = run && mood !== 'dead' && mood !== 'fainting';
+  const feet = dead ? '' : `<ellipse class="fl" cx="78" cy="175" rx="14" ry="7" fill="${dark}"/><ellipse class="fr" cx="122" cy="175" rx="14" ry="7" fill="${dark}"/>`;
   return `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <defs><clipPath id="${clip}"><path d="${sh.d}"/></clipPath></defs>
     ${dead ? '' : '<ellipse cx="100" cy="182" rx="56" ry="6" fill="rgba(0,0,0,.13)"/>'}
     <g transform="translate(100 180) scale(${scale}) translate(-100 -180)">
-      <g class="pet-anim m-${mood}">
+      <g class="pet-anim ${running ? 'm-run' : 'm-' + mood}">
         ${feet}
         <path d="${sh.d}" fill="${col}"/>
         <g clip-path="url(#${clip})">${pattern}${band}<path d="${sh.d}" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="10" transform="translate(-4 -6)"/></g>
@@ -170,121 +171,6 @@ function petSVG(p, mood, stage, id) {
       </g>
     </g>
   </svg>`;
-}
-
-/* ============ file parsers (COROS exports) ============ */
-const FIT_EPOCH = 631065600; // 1989-12-31T00:00:00Z in unix seconds
-function parseFIT(buf) {
-  const dv = new DataView(buf);
-  const hs = dv.getUint8(0);
-  const dataSize = dv.getUint32(4, true);
-  const sig = String.fromCharCode(dv.getUint8(8), dv.getUint8(9), dv.getUint8(10), dv.getUint8(11));
-  if (sig !== '.FIT') throw new Error('Not a FIT file');
-  const end = Math.min(hs + dataSize, buf.byteLength);
-  let pos = hs;
-  const defs = {}, sessions = [], records = [];
-  let sport = null;
-  const rd = (size, little) => {
-    let v;
-    if (size === 1) v = dv.getUint8(pos);
-    else if (size === 2) v = dv.getUint16(pos, little);
-    else if (size === 4) v = dv.getUint32(pos, little);
-    else v = null;
-    pos += size;
-    return v;
-  };
-  while (pos < end) {
-    const hdr = dv.getUint8(pos++);
-    let local, isDef = false;
-    if (hdr & 0x80) local = (hdr >> 5) & 3;
-    else { local = hdr & 0x0f; isDef = !!(hdr & 0x40); }
-    if (isDef) {
-      const hasDev = !!(hdr & 0x20);
-      pos++; // reserved
-      const little = dv.getUint8(pos++) === 0;
-      const gmn = dv.getUint16(pos, little); pos += 2;
-      const nf = dv.getUint8(pos++);
-      const fields = [];
-      for (let i = 0; i < nf; i++) { fields.push({ num: dv.getUint8(pos), size: dv.getUint8(pos + 1) }); pos += 3; }
-      let devSize = 0;
-      if (hasDev) { const nd = dv.getUint8(pos++); for (let i = 0; i < nd; i++) { devSize += dv.getUint8(pos + 1); pos += 3; } }
-      defs[local] = { gmn, little, fields, devSize };
-    } else {
-      const d = defs[local];
-      if (!d) throw new Error('Corrupt FIT file');
-      const vals = {};
-      for (const f of d.fields) vals[f.num] = rd(f.size, d.little);
-      pos += d.devSize;
-      if (d.gmn === 18) sessions.push(vals);                      // session
-      else if (d.gmn === 12 && vals[0] != null) sport = vals[0];  // sport
-      else if (d.gmn === 20) records.push(vals);                  // record
-    }
-  }
-  const ok = (v, bad) => v != null && v !== bad;
-  const out = [];
-  for (const s of sessions) {
-    if (!ok(s[9], 0xFFFFFFFF)) continue;
-    const sp = ok(s[5], 0xFF) ? s[5] : sport;
-    out.push({
-      date: ok(s[2], 0xFFFFFFFF) ? (s[2] + FIT_EPOCH) * 1000 : (ok(s[253], 0xFFFFFFFF) ? (s[253] + FIT_EPOCH) * 1000 : null),
-      km: s[9] / 100 / 1000,
-      durMin: ok(s[8], 0xFFFFFFFF) ? s[8] / 1000 / 60 : (ok(s[7], 0xFFFFFFFF) ? s[7] / 1000 / 60 : null),
-      isRun: sp == null || sp === 1
-    });
-  }
-  if (!out.length && records.length) { // fallback: last record distance
-    const withDist = records.filter(r => ok(r[5], 0xFFFFFFFF) && ok(r[253], 0xFFFFFFFF));
-    if (withDist.length) {
-      const a = withDist[0], b = withDist[withDist.length - 1];
-      out.push({ date: (a[253] + FIT_EPOCH) * 1000, km: b[5] / 100 / 1000, durMin: (b[253] - a[253]) / 60, isRun: sport == null || sport === 1 });
-    }
-  }
-  return out.filter(a => a.date);
-}
-const kids = (el, name) => Array.from(el.children).filter(c => c.localName === name);
-const all = (el, name) => Array.from(el.getElementsByTagNameNS('*', name));
-function parseTCX(text) {
-  const doc = new DOMParser().parseFromString(text, 'application/xml');
-  if (doc.getElementsByTagName('parsererror').length) throw new Error('Bad TCX');
-  return all(doc, 'Activity').map(a => {
-    const sport = a.getAttribute('Sport') || '';
-    const idEl = kids(a, 'Id')[0];
-    let m = 0, sec = 0;
-    for (const lap of kids(a, 'Lap')) {
-      const dm = kids(lap, 'DistanceMeters')[0], ts = kids(lap, 'TotalTimeSeconds')[0];
-      if (dm) m += parseFloat(dm.textContent) || 0;
-      if (ts) sec += parseFloat(ts.textContent) || 0;
-    }
-    const startAttr = kids(a, 'Lap')[0] && kids(a, 'Lap')[0].getAttribute('StartTime');
-    return { date: Date.parse(idEl ? idEl.textContent.trim() : startAttr), km: m / 1000, durMin: sec ? sec / 60 : null, isRun: !sport || /run/i.test(sport) };
-  }).filter(a => !isNaN(a.date));
-}
-function hav(a, b) {
-  const R = 6371.0088, rad = x => x * Math.PI / 180;
-  const dLat = rad(b[0] - a[0]), dLon = rad(b[1] - a[1]);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-function parseGPX(text) {
-  const doc = new DOMParser().parseFromString(text, 'application/xml');
-  if (doc.getElementsByTagName('parsererror').length) throw new Error('Bad GPX');
-  return all(doc, 'trk').map(trk => {
-    const type = (kids(trk, 'type')[0] || {}).textContent || '';
-    let km = 0, t0 = null, t1 = null;
-    for (const seg of kids(trk, 'trkseg')) {
-      let prev = null;
-      for (const pt of kids(seg, 'trkpt')) {
-        const p = [parseFloat(pt.getAttribute('lat')), parseFloat(pt.getAttribute('lon'))];
-        if (isNaN(p[0]) || isNaN(p[1])) continue;
-        if (prev) km += hav(prev, p);
-        prev = p;
-        const te = kids(pt, 'time')[0];
-        if (te) { const t = Date.parse(te.textContent); if (!isNaN(t)) { if (t0 == null) t0 = t; t1 = t; } }
-      }
-    }
-    if (t0 == null) { const mt = all(doc, 'time')[0]; if (mt) t0 = Date.parse(mt.textContent); }
-    return { date: t0, km, durMin: t0 != null && t1 != null && t1 > t0 ? (t1 - t0) / 60000 : null, isRun: !type || /run/i.test(type) };
-  }).filter(a => a.date != null && !isNaN(a.date));
 }
 
 /* ============ storage ============ */
@@ -593,10 +479,10 @@ function header() {
     : `<div class="save-status"><span class="dot"></span>On this device</div>`;
   const incoming = mode === 'cloud' ? friends.rows.filter(r => r.status === 'pending' && r.addressee === profile.id).length : 0;
   return `<header class="top"><div class="brand">Run<span>agotchi</span></div>${right}</header>
-    ${mode === 'cloud' ? `<div class="tabs"><button data-tab="pet" class="${tab === 'pet' ? 'on' : ''}">My pet</button><button data-tab="friends" class="${tab === 'friends' ? 'on' : ''}">Friends${incoming ? `<span class="pill">${incoming}</span>` : ''}</button></div>` : ''}`;
+    ${mode === 'cloud' ? `<div class="tabs three"><button data-tab="pet" class="${tab === 'pet' ? 'on' : ''}">My pet</button><button data-tab="run" class="${tab === 'run' ? 'on' : ''}">Run together</button><button data-tab="friends" class="${tab === 'friends' ? 'on' : ''}">Friends${incoming ? `<span class="pill">${incoming}</span>` : ''}</button></div>` : ''}`;
 }
 function bindHeader() {
-  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0, 0); if (tab === 'friends') loadFriends(); });
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0, 0); if (tab !== 'pet') loadFriends(); });
 }
 function statusLine(sim, p) {
   const n = `<b>${esc(p.name)}</b>`;
@@ -640,9 +526,8 @@ function renderPet() {
       <div class="stat"><div class="v">${sim.fedKm >= 100 ? Math.round(sim.fedKm) : sim.fedKm.toFixed(1)}</div><div class="k">km fed total</div></div>
     </div>
 
-    <div class="actions">
+    <div class="actions single">
       <button class="btn primary" id="addRun">+ Log a run</button>
-      <button class="btn dark" id="syncBtn">Sync COROS</button>
     </div>
 
     <section class="card">
@@ -650,24 +535,11 @@ function renderPet() {
       ${shown.length ? `<ul class="runs">${shown.map(r => `
         <li>
           <div class="km">${fmtKm(r.km)} km</div>
-          <div class="meta">${fmtDate(r.date)}${r.source === 'coros' ? '<span class="badge coros">COROS</span>' : '<span class="badge">Manual</span>'}${r.date < p.createdAt ? '<span class="badge pre">before hatch</span>' : ''}${r.date > t ? '<span class="badge pre">future</span>' : ''}<br>${[r.durMin ? Math.round(r.durMin) + ' min' : '', pace(r)].filter(Boolean).join(' · ')}</div>
+          <div class="meta">${fmtDate(r.date)}${r.source === 'coros' ? '<span class="badge">Imported</span>' : ''}${r.date < p.createdAt ? '<span class="badge pre">before hatch</span>' : ''}${r.date > t ? '<span class="badge pre">future</span>' : ''}<br>${[r.durMin ? Math.round(r.durMin) + ' min' : '', pace(r)].filter(Boolean).join(' · ')}</div>
           <button class="x" data-del="${r.id}" aria-label="Delete run">×</button>
         </li>`).join('')}</ul>
         ${sorted.length > 6 ? `<button class="btn small ghost" id="moreRuns" style="margin-top:6px">${showAllRuns ? 'Show fewer' : 'Show all ' + sorted.length + ' runs'}</button>` : ''}`
-      : `<div class="empty">No runs yet. Log one or sync from COROS to feed ${esc(p.name)}.</div>`}
-    </section>
-
-    <section class="card" id="corosCard">
-      <h2><span>Sync from COROS</span><span class="coros-logo">COROS</span></h2>
-      <p class="small muted" style="margin:0">Drop the files your COROS watch records (.fit, .tcx or .gpx). Runs are added, duplicates and non-run activities are skipped.</p>
-      <ol class="steps">
-        <li>Open the <b>COROS app</b> and tap a workout.</li>
-        <li>Tap the <b>share icon → Export</b> and pick <b>.fit</b>.</li>
-        <li>Choose the file here. You can pick several at once.</li>
-      </ol>
-      <div class="drop" id="drop"><label for="file">Choose files</label> or drop them here
-        <input type="file" id="file" accept=".fit,.tcx,.gpx" multiple hidden></div>
-      <div class="note">Automatic sync (runs arriving on their own after your watch syncs) needs COROS API access and a small server. That's coming later. This file import uses the same data in the meantime.</div>
+      : `<div class="empty">No runs yet. Log one to feed ${esc(p.name)}.</div>`}
     </section>
 
     <section class="card">
@@ -687,7 +559,6 @@ function renderPet() {
     </section>`;
   bindHeader();
   $('#addRun').onclick = openAddRun;
-  $('#syncBtn').onclick = () => { $('#corosCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); setTimeout(() => $('#file').click(), 350); };
   document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
     const r = S.runs.find(x => x.id === b.dataset.del); if (!r) return;
     confirmSheet('Delete this run?', `${fmtKm(r.km)} km on ${fmtDate(r.date)}. ${esc(p.name)} will un-eat it.`, 'Delete', () => {
@@ -695,12 +566,6 @@ function renderPet() {
     });
   });
   if ($('#moreRuns')) $('#moreRuns').onclick = () => { showAllRuns = !showAllRuns; render(); };
-  const fi = $('#file');
-  fi.onchange = () => { if (fi.files.length) handleFiles(Array.from(fi.files)); fi.value = ''; };
-  const dz = $('#drop');
-  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
-  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); handleFiles(Array.from(e.dataTransfer.files)); });
   $('#editPet').onclick = () => { draft = { ...S.pet }; render(); window.scrollTo(0, 0); };
   document.querySelectorAll('[data-tm]').forEach(b => b.onclick = () => {
     const h = +b.dataset.tm; devOffset = h ? devOffset + h * H : 0; render();
@@ -739,7 +604,10 @@ async function loadFriends() {
     friends = { loaded: true, loading: false, error: false, rows,
       profiles: Object.fromEntries(pr.data.map(p => [p.id, p])), pets: Object.fromEntries(pe.data.map(p => [p.user_id, p])) };
   } catch (e) { console.error(e); friends.loading = false; friends.error = true; }
-  if (screen === 'app' && !draft && !sheetOpen() && !isTyping()) render();
+  if (screen === 'app' && !draft && !sheetOpen() && !isTyping()) {
+    if (tab === 'run') { const sig = runSignature(); if (sig === lastRunSig) return; }
+    render();
+  }
 }
 function friendStatus(sim, row) {
   const m = moodOf(sim);
@@ -852,6 +720,92 @@ async function removeFriendship(id, msg) {
   await loadFriends(); toast(msg);
 }
 
+
+/* ============ run together ============ */
+// Strength decides the running order: how full the pet is right now,
+// plus a bonus for its level (long-term training).
+const strengthOf = (sim, level) => sim.dead ? -1 : sim.f <= 0 ? 0 : Math.round(sim.f * 0.75 + Math.min(level, 25));
+let lastRunSig = '';
+function runners() {
+  const list = [];
+  if (S && S.pet) {
+    const sim = simulate(S, Date.now()), level = levelOf(sim.fedKm);
+    list.push({ key: 'me', me: true, pet: S.pet, user: profile.username, sim, level, stage: stageOf(sim.fedKm) });
+  }
+  const me = profile.id;
+  for (const r of friends.rows.filter(r => r.status === 'accepted')) {
+    const id = r.requester === me ? r.addressee : r.requester, row = friends.pets[id];
+    if (!row) continue;
+    list.push({ key: id, me: false, pet: row, user: (friends.profiles[id] || {}).username || '', sim: simulateSnapshot(row, Date.now()), level: row.level, stage: row.stage });
+  }
+  list.forEach(x => { x.mood = moodOf(x.sim); x.strength = strengthOf(x.sim, x.level); });
+  return list.sort((a, b) => b.strength - a.strength || b.level - a.level || a.pet.name.localeCompare(b.pet.name));
+}
+const runSignature = () => runners().map(x => x.key + ':' + x.mood + ':' + x.strength).join('|') + (friends.loaded ? '' : '…');
+
+const svgUri = s => `url('data:image/svg+xml,${encodeURIComponent(s)}')`;
+function sceneLayers(night) {
+  const c = night
+    ? { cloud: '#8a93b8', far: '#3b4370', near: '#2f5a55', tree: '#1f4a3c', trunk: '#3a2c22', grass: '#2f6b47' }
+    : { cloud: '#ffffff', far: '#a9b8d6', near: '#8cc49a', tree: '#4f9a62', trunk: '#8a5a3c', grass: '#6cbf6f' };
+  const clouds = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="120"><g fill="${c.cloud}" opacity=".9"><circle cx="70" cy="60" r="22"/><circle cx="98" cy="50" r="28"/><circle cx="130" cy="62" r="20"/><rect x="60" y="60" width="80" height="22" rx="11"/><circle cx="380" cy="34" r="16"/><circle cx="402" cy="26" r="20"/><circle cx="426" cy="36" r="14"/><rect x="372" y="34" width="62" height="16" rx="8"/></g></svg>`;
+  const far = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="140"><path d="M0 140V90L80 50L150 85L230 30L320 80L400 55L480 95L560 40L650 85L730 60L800 90V140Z" fill="${c.far}"/><path d="M230 30L212 40L230 44L246 38ZM560 40L544 50L562 53L576 49Z" fill="#fff" opacity="${night ? .25 : .7}"/></svg>`;
+  const near = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="110"><path d="M0 110V60Q75 20 150 55T300 50T450 45T600 60V110Z" fill="${c.near}"/></svg>`;
+  const trees = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="110"><rect x="36" y="70" width="8" height="40" fill="${c.trunk}"/><circle cx="40" cy="58" r="26" fill="${c.tree}"/><rect x="146" y="78" width="6" height="32" fill="${c.trunk}"/><path d="M149 24L126 66H172ZM149 44L122 86H176Z" fill="${c.tree}"/><rect x="256" y="76" width="7" height="34" fill="${c.trunk}"/><circle cx="260" cy="64" r="20" fill="${c.tree}"/><circle cx="246" cy="76" r="14" fill="${c.tree}"/><circle cx="274" cy="76" r="14" fill="${c.tree}"/><ellipse cx="330" cy="104" rx="20" ry="10" fill="${c.tree}"/></svg>`;
+  const track = `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="96"><rect width="160" height="14" fill="${c.grass}"/><path d="M10 14l4-7 4 7M70 14l3-6 3 6M120 14l4-8 4 8" fill="${c.grass}" stroke="${c.grass}"/><rect y="14" width="160" height="82" fill="${night ? '#7a3a30' : '#c8553d'}"/><rect y="16" width="160" height="2" fill="#fff" opacity=".8"/><rect y="94" width="160" height="2" fill="#fff" opacity=".8"/><rect x="0" y="54" width="40" height="3" fill="#fff" opacity=".85"/><rect x="80" y="54" width="40" height="3" fill="#fff" opacity=".85"/></svg>`;
+  return `
+    <div class="layer l-clouds" style="background-image:${svgUri(clouds)}"></div>
+    <div class="layer l-far" style="background-image:${svgUri(far)}"></div>
+    <div class="layer l-near" style="background-image:${svgUri(near)}"></div>
+    <div class="layer l-trees" style="background-image:${svgUri(trees)}"></div>
+    <div class="layer l-track" style="background-image:${svgUri(track)}"></div>`;
+}
+function skyFor(hour) {
+  if (hour >= 21 || hour < 5) return { night: true, bg: 'linear-gradient(#141a3a, #2b3466 70%, #3d4479)', orb: '<div class="moon"></div><div class="stars"></div>' };
+  if (hour < 8) return { night: false, bg: 'linear-gradient(#ffc9a8, #ffe3c4 60%, #fff1dc)', orb: '<div class="sun low"></div>' };
+  if (hour >= 18) return { night: false, bg: 'linear-gradient(#ff9e7a, #ffc49a 55%, #ffe0b8)', orb: '<div class="sun low"></div>' };
+  return { night: false, bg: 'linear-gradient(#7cc4ff, #bfe3ff 65%, #e6f5ff)', orb: '<div class="sun"></div>' };
+}
+function renderRun() {
+  const list = runners();
+  lastRunSig = runSignature();
+  const n = list.length;
+  const sky = skyFor(new Date().getHours());
+  const LANES = [{ b: 44, z: 3, s: 1 }, { b: 70, z: 1, s: .86 }, { b: 20, z: 5, s: 1.08 }]; // middle, back, front
+  const base = n > 8 ? 70 : n > 4 ? 84 : 100;
+  const pos = i => n === 1 ? 50 : 82 - i * (68 / (n - 1));
+  const label = x => x.mood === 'dead' ? 'starved' : x.mood === 'fainting' ? 'fainted' : x.mood === 'starving' ? 'starving' : x.mood === 'hungry' ? 'hungry' : x.mood === 'content' ? 'fine' : 'strong';
+  const runnerHtml = list.map((x, i) => {
+    const lane = LANES[i % 3];
+    const w = Math.round(base * lane.s);
+    const spd = (0.75 - Math.max(0, x.strength) / 100 * 0.4).toFixed(2);
+    return `<div class="runner ${x.me ? 'me' : ''} ${x.mood}" style="left:${pos(i)}%;bottom:${lane.b}px;width:${w}px;z-index:${lane.z + 10};--spd:${spd}s">
+      ${x.mood !== 'dead' && x.mood !== 'fainting' && x.strength >= 70 ? '<div class="dust"><i></i><i></i><i></i></div>' : ''}
+      ${petSVG(x.pet, x.mood, x.stage, 'r' + x.key.slice(0, 8), true)}
+      <div class="tag">${x.me ? '<b>You</b> · ' : ''}${esc(x.pet.name)}</div>
+    </div>`;
+  }).join('');
+  const rows = list.map((x, i) => `
+    <li class="${x.me ? 'me' : ''}">
+      <span class="rank">${i + 1}</span>
+      <span class="who"><b>${esc(x.pet.name)}</b><span class="small muted">${x.me ? 'you' : '@' + esc(x.user)} · LV ${x.level}</span></span>
+      <span class="str"><span class="sbar"><i style="width:${Math.max(0, x.strength)}%"></i></span><span class="small ${x.strength < 15 ? 'bad' : 'muted'}">${label(x)}</span></span>
+    </li>`).join('');
+  $('#app').innerHTML = `${header()}
+    <div class="scene ${sky.night ? 'night' : ''}" style="background:${sky.bg}">
+      ${sky.orb}
+      ${sceneLayers(sky.night)}
+      ${n ? runnerHtml : ''}
+      ${n <= 1 ? `<div class="scene-note">${!friends.loaded && !friends.error ? 'Loading friends…' : 'Add friends to run together!'}</div>` : ''}
+    </div>
+    <p class="small muted center" style="margin:8px 0 14px">Strongest pets lead the pack, the weakest trail behind. Strength = how full a pet is, plus its level.</p>
+    ${n ? `<section class="card"><h2>The pack <button class="btn small ghost" id="rrefresh">${friends.loading ? 'Loading…' : 'Refresh'}</button></h2><ol class="pack">${rows}</ol>
+      ${n === 1 ? `<div class="empty">Only you so far. <button class="linkbtn" id="goFriends">Add friends</button></div>` : ''}</section>` : ''}`;
+  bindHeader();
+  if ($('#rrefresh')) $('#rrefresh').onclick = loadFriends;
+  if ($('#goFriends')) $('#goFriends').onclick = () => { tab = 'friends'; render(); };
+}
+
 /* ============ add run ============ */
 function openAddRun() {
   openSheet(`<h3>Log a run</h3>
@@ -886,45 +840,6 @@ function openAddRun() {
     });
 }
 
-/* ============ import ============ */
-function isDup(a) { return S.runs.some(r => Math.abs(r.date - a.date) < 2 * 60000 && Math.abs(r.km - a.km) < 0.05); }
-async function handleFiles(files) {
-  if (!S || !S.pet) return;
-  const added = []; let dup = 0, notRun = 0, failed = 0;
-  for (const file of files) {
-    const ext = (file.name.split('.').pop() || '').toLowerCase();
-    try {
-      let acts;
-      if (ext === 'fit') acts = parseFIT(await file.arrayBuffer());
-      else if (ext === 'tcx') acts = parseTCX(await file.text());
-      else if (ext === 'gpx') acts = parseGPX(await file.text());
-      else { failed++; continue; }
-      if (!acts.length) { failed++; continue; }
-      for (const a of acts) {
-        if (!a.isRun) { notRun++; continue; }
-        if (!(a.km > 0.01) || a.km > 400) { failed++; continue; }
-        a.km = Math.round(a.km * 100) / 100;
-        if (isDup(a)) { dup++; continue; }
-        const r = { id: newId(), date: a.date, km: a.km, durMin: a.durMin ? Math.round(a.durMin * 10) / 10 : null, source: 'coros' };
-        S.runs.push(r); added.push(r);
-      }
-    } catch (e) { failed++; }
-  }
-  render();
-  const fed = added.filter(r => r.date >= S.pet.createdAt && r.date <= now());
-  const fedKm = fed.reduce((s, r) => s + r.km, 0);
-  if (fedKm) feedFx(fedKm);
-  const parts = [];
-  if (added.length) parts.push(`<b>Added ${added.length} run${added.length > 1 ? 's' : ''}</b> (${fmtKm(added.reduce((s, r) => s + r.km, 0))} km).`);
-  else parts.push('<b>No new runs added.</b>');
-  if (added.length - fed.length > 0) parts.push(`${added.length - fed.length} from before ${esc(S.pet.name)} hatched (no food).`);
-  if (dup) parts.push(`${dup} already in your log.`);
-  if (notRun) parts.push(notRun === 1 ? `1 activity wasn't a run.` : `${notRun} activities weren't runs.`);
-  if (failed) parts.push(`${failed} file${failed > 1 ? 's' : ''} couldn't be read.`);
-  toast(parts.join(' '), 6000);
-  if (added.length) await persistAddRuns(added);
-}
-
 /* ============ render ============ */
 const isTyping = () => { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA'); };
 function render() {
@@ -935,12 +850,13 @@ function render() {
   if (draft) return renderCreator(!!(S && S.pet));
   if (!S || !S.pet) { draft = newDraft(); return renderCreator(false); }
   if (tab === 'friends' && mode === 'cloud') return renderFriends();
+  if (tab === 'run' && mode === 'cloud') return renderRun();
   return renderPet();
 }
 
 // Hunger keeps ticking: redraw every minute, refresh friends every 5 minutes.
 setInterval(() => {
-  if (screen !== 'app' || draft || !S || !S.pet || sheetOpen() || isTyping()) return;
+  if (screen !== 'app' || draft || !S || !S.pet || sheetOpen() || isTyping() || tab === 'run') return;
   const d = document.querySelector('details.settings'); const open = d && d.open;
   render();
   if (open) document.querySelector('details.settings').open = true;

@@ -3,7 +3,9 @@
 A Tamagotchi-style pet that lives on the kilometers you run.
 
 - Create and name your own pet
-- Log runs by hand or import COROS exports (.fit, .tcx, .gpx)
+- Log runs by hand
+- Friends: add each other by username and see each other's pets
+- Run together: your pet and your friends' pets run as a pack through a moving landscape; the strongest lead, the weakest trail behind
 - Each km = 10 food; food drains over time. No running → hungry → starving → fainted → starved
 - A run of 5 km or more revives a starved pet
 
