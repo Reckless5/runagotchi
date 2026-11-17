@@ -71,3 +71,10 @@ Deno.test("garmin push: manually entered activities are imported", () => {
   assertEquals(byUser["u9"][0].km, 5);
   assertEquals(byUser["u9"][0].isRun, true);
 });
+
+Deno.test("webhook accepts the key in the path", async () => {
+  const bad = await handler(new Request("http://x/functions/v1/watches/webhook/garmin/nope", { method: "POST", body: "{}" }));
+  assertEquals(bad.status, 403);
+  const ok = await handler(new Request("http://x/functions/v1/watches/webhook/garmin/" + Deno.env.get("WEBHOOK_KEY"), { method: "POST", body: "{}" }));
+  assertEquals(ok.status, 200);
+});

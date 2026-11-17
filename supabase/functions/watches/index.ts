@@ -9,7 +9,8 @@
 //   POST /watches  {action: "sync", provider}           fetch new runs now (COROS, Suunto)
 //   POST /watches  {action: "diagnose", provider}       what COROS offers (to tune the import)
 //   GET  /watches/callback/<provider>                   the brand sends the user back here after login
-//   POST /watches/webhook/<provider>?key=WEBHOOK_KEY    Garmin/Suunto push new activities here
+//   POST /watches/webhook/<provider>/WEBHOOK_KEY        Garmin/Suunto push new activities here
+//        (or /webhook/<provider>?key=WEBHOOK_KEY)
 //   POST /watches/cron?key=WEBHOOK_KEY                  scheduled: fetch new COROS runs for everyone
 //   GET  /watches/status                                health check for the brands (always "ok")
 //
@@ -619,8 +620,13 @@ async function handleCallback(url: URL, p: Provider, db: SupabaseClient) {
   }
 }
 
-async function handleWebhook(req: Request, url: URL, p: Provider, db: SupabaseClient) {
-  if (!safeEqual(url.searchParams.get("key") ?? "", WEBHOOK_KEY)) return json({ error: "forbidden" }, 403);
+async function handleWebhook(req: Request, url: URL, p: Provider, db: SupabaseClient, pathKey = "") {
+  // The key can come as ?key=… or as the last part of the path (/webhook/garmin/<key>),
+  // because some brands drop the query string when they push.
+  if (!safeEqual(url.searchParams.get("key") || pathKey, WEBHOOK_KEY)) {
+    console.warn("webhook key mismatch", p.id, { query: url.searchParams.has("key"), path: !!pathKey, secretSet: !!WEBHOOK_KEY });
+    return json({ error: "forbidden" }, 403);
+  }
   const raw = await req.text();
   let body: any = {};
   try { body = raw ? JSON.parse(raw) : {}; } catch { return json({ error: "bad json" }, 400); }
@@ -682,7 +688,7 @@ export async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const parts = url.pathname.split("/").filter(Boolean);
   const i = parts.indexOf("watches");
-  const [route, pid] = i >= 0 ? parts.slice(i + 1) : parts;
+  const [route, pid, extra] = i >= 0 ? parts.slice(i + 1) : parts;
   const db = admin();
   try {
     if (!route && req.method === "POST") return await handleAction(req, db);
@@ -691,7 +697,7 @@ export async function handler(req: Request): Promise<Response> {
     const p = PROVIDERS[pid as ProviderId];
     if (!p) return json({ error: "not found" }, 404);
     if (route === "callback" && req.method === "GET") return await handleCallback(url, p, db);
-    if (route === "webhook" && req.method === "POST") return await handleWebhook(req, url, p, db);
+    if (route === "webhook" && req.method === "POST") return await handleWebhook(req, url, p, db, extra ?? "");
     return json({ error: "not found" }, 404);
   } catch (e) {
     console.error(e);

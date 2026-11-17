@@ -24,7 +24,7 @@ https://uqwuhdwhzuqudnvubwep.supabase.co/functions/v1/watches/callback/suunto
 **Webhook URLs** (where the brand pushes new activities). `YOUR_WEBHOOK_KEY` is the secret you set in Supabase (see `watch-setup.md`):
 
 ```
-https://uqwuhdwhzuqudnvubwep.supabase.co/functions/v1/watches/webhook/garmin?key=YOUR_WEBHOOK_KEY
+https://uqwuhdwhzuqudnvubwep.supabase.co/functions/v1/watches/webhook/garmin/YOUR_WEBHOOK_KEY
 https://uqwuhdwhzuqudnvubwep.supabase.co/functions/v1/watches/webhook/coros?key=YOUR_WEBHOOK_KEY
 https://uqwuhdwhzuqudnvubwep.supabase.co/functions/v1/watches/webhook/suunto?key=YOUR_WEBHOOK_KEY
 ```
