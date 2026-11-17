@@ -225,6 +225,40 @@ ol.pack li.me .rank{background:var(--accent);color:#fff}
 .pack .bad{color:var(--bad)}
 @media (prefers-reduced-motion:reduce){.scene .layer,.m-run,.m-run .fl,.m-run .fr,.dust i{animation:none}}
 
+
+.tabs.four{grid-template-columns:.9fr .7fr 1.15fr 1fr}
+.tabs.four button{font-size:14px;padding:9px 4px}
+
+/* challenges */
+.ch-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px}
+.ch-title{font-size:18px;font-weight:700;letter-spacing:-.2px}
+.ch.done{opacity:.92}
+ol.rank{list-style:none;margin:0;padding:0}
+ol.rank li{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+ol.rank li:first-child{border-top:0}
+ol.rank .rk{width:22px;text-align:center;font-family:"DM Mono",monospace;font-size:14px;color:var(--muted);flex:none}
+ol.rank li.me .rk{color:var(--accent);font-weight:600}
+.av{width:38px;height:38px;border-radius:10px;background:var(--lcd);flex:none;overflow:hidden;display:grid;place-items:center}
+.av svg{width:100%;height:100%}
+.av.empty{font-weight:700;color:var(--lcd-ink)}
+ol.rank .body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+ol.rank .line{display:flex;justify-content:space-between;gap:8px}
+ol.rank .pct{font-family:"DM Mono",monospace;font-size:14px}
+ol.rank .pct.full{color:var(--good);font-weight:600}
+.pbar{height:8px;border-radius:5px;background:#ece3d2;overflow:hidden}
+.pbar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#ffb08a,var(--accent))}
+li.me .pbar i{background:linear-gradient(90deg,#ff8a5c,#e8501f)}
+.cheer{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:6px 10px;font-size:13px;font-weight:600;white-space:nowrap;flex:none}
+.cheer.kudos{border-color:#f0c36b;background:#fff7e3}
+.cheer.encourage{border-color:#9fd1b4;background:#eefaf3}
+.cheer.sent{opacity:.6}
+.cheer:disabled{opacity:.4}
+.waiting{margin-top:8px}
+details.past{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;margin-bottom:14px}
+details.past summary{cursor:pointer;list-style:none;font-size:16px}
+details.past summary::-webkit-details-marker{display:none}
+details.past .card{margin:12px 0 0;border:0;padding:0;background:transparent}
+
 /* pet animation */
 .pet-anim{transform-box:fill-box;transform-origin:50% 100%}
 .m-happy{animation:bounce 1.1s ease-in-out infinite}

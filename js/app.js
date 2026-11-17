@@ -34,6 +34,7 @@ let draft = null;           // pet being created / edited
 let showAllRuns = false;
 let authMode = 'login';
 let friends = { loaded: false, loading: false, error: false, rows: [], profiles: {}, pets: {} };
+let challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
 const now = () => Date.now() + devOffset;
 const H = 3.6e6, D = 24 * H;
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() :
@@ -210,11 +211,11 @@ async function persistDeletePet() {
 }
 async function persistAddRuns(runs) {
   if (mode === 'local') return saveLocal();
-  if (await cloud(sb.from('runs').insert(runs.map(runToRow)), 'runs')) await pushSnapshot();
+  if (await cloud(sb.from('runs').insert(runs.map(runToRow)), 'runs')) { await pushSnapshot(); loadChallenges(); }
 }
 async function persistDeleteRun(id) {
   if (mode === 'local') return saveLocal();
-  if (await cloud(sb.from('runs').delete().eq('id', id), 'run')) await pushSnapshot();
+  if (await cloud(sb.from('runs').delete().eq('id', id), 'run')) { await pushSnapshot(); loadChallenges(); }
 }
 async function pushSnapshot() {
   if (mode !== 'cloud' || !S || !S.pet) return;
@@ -294,6 +295,7 @@ function startLocal() {
 async function onSession(uid) {
   closeSheet();
   friends = { loaded: false, loading: false, error: false, rows: [], profiles: {}, pets: {} };
+  challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
   profile = null; S = null; devOffset = 0;
   if (!uid) {
     if (isGuest()) return startLocal();
@@ -323,6 +325,7 @@ async function loadAccount() {
   render();
   if (S.pet) pushSnapshot();
   loadFriends();
+  loadChallenges();
 }
 // A pet made before logging in moves into the account the first time.
 async function moveLocalToAccount(local) {
@@ -478,11 +481,12 @@ function header() {
     ? `<div class="save-status"><span class="dot cloud"></span>@${esc(profile.username)}</div>`
     : `<div class="save-status"><span class="dot"></span>On this device</div>`;
   const incoming = mode === 'cloud' ? friends.rows.filter(r => r.status === 'pending' && r.addressee === profile.id).length : 0;
+  const invites = mode === 'cloud' ? challenges.list.filter(c => myStatus(c) === 'invited' && c.end > Date.now()).length : 0;
   return `<header class="top"><div class="brand">Run<span>agotchi</span></div>${right}</header>
-    ${mode === 'cloud' ? `<div class="tabs three"><button data-tab="pet" class="${tab === 'pet' ? 'on' : ''}">My pet</button><button data-tab="run" class="${tab === 'run' ? 'on' : ''}">Run together</button><button data-tab="friends" class="${tab === 'friends' ? 'on' : ''}">Friends${incoming ? `<span class="pill">${incoming}</span>` : ''}</button></div>` : ''}`;
+    ${mode === 'cloud' ? `<div class="tabs four"><button data-tab="pet" class="${tab === 'pet' ? 'on' : ''}">My pet</button><button data-tab="run" class="${tab === 'run' ? 'on' : ''}">Run</button><button data-tab="challenge" class="${tab === 'challenge' ? 'on' : ''}">Challenge${invites ? `<span class="pill">${invites}</span>` : ''}</button><button data-tab="friends" class="${tab === 'friends' ? 'on' : ''}">Friends${incoming ? `<span class="pill">${incoming}</span>` : ''}</button></div>` : ''}`;
 }
 function bindHeader() {
-  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0, 0); if (tab !== 'pet') loadFriends(); });
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0, 0); if (tab !== 'pet') loadFriends(); if (tab === 'challenge') loadChallenges(); });
 }
 function statusLine(sim, p) {
   const n = `<b>${esc(p.name)}</b>`;
@@ -816,6 +820,206 @@ function renderRun() {
   if ($('#goFriends')) $('#goFriends').onclick = () => { tab = 'friends'; render(); };
 }
 
+
+/* ============ challenges ============ */
+const DURATIONS = [{ k: '1d', label: '1 day', days: 1 }, { k: '3d', label: '3 days', days: 3 }, { k: '1w', label: '1 week', days: 7 },
+  { k: '2w', label: '2 weeks', days: 14 }, { k: '1m', label: '1 month', days: 30 }];
+const DIST_PRESETS = [5, 10, 21.1, 42.2, 50, 100];
+const myStatus = c => (c.members.find(m => m.user_id === profile.id) || {}).status;
+const unameOf = id => id === profile.id ? profile.username : ((friends.profiles[id] || challenges.profiles[id] || {}).username || 'someone');
+function durLabel(c) {
+  const days = Math.round((c.end - c.start) / D);
+  const d = DURATIONS.find(x => x.days === days);
+  return d ? d.label : days + ' days';
+}
+const fmtDist = km => (Math.round(km * 10) / 10).toString().replace(/\.0$/, '');
+
+async function loadChallenges() {
+  if (mode !== 'cloud' || challenges.loading) return;
+  challenges.loading = true; challenges.error = false;
+  if (tab === 'challenge') render();
+  try {
+    const [cr, mr, pr, chr] = await Promise.all([
+      sb.from('challenges').select('id,creator,distance_km,starts_at,ends_at,created_at'),
+      sb.from('challenge_members').select('challenge_id,user_id,status'),
+      sb.rpc('challenge_progress_all'),
+      sb.from('challenge_cheers').select('id,challenge_id,from_user,to_user,kind')
+    ]);
+    for (const r of [cr, mr, pr, chr]) if (r.error) throw r.error;
+    const ids = [...new Set(mr.data.map(m => m.user_id).concat(cr.data.map(c => c.creator)))];
+    const missing = ids.filter(id => id !== profile.id && !friends.profiles[id] && !challenges.profiles[id]);
+    if (missing.length) {
+      const { data, error } = await sb.from('profiles').select('id,username').in('id', missing);
+      if (error) throw error;
+      data.forEach(p => { challenges.profiles[p.id] = p; });
+    }
+    const list = cr.data.map(c => ({
+      ...c, distance_km: Number(c.distance_km), start: Date.parse(c.starts_at), end: Date.parse(c.ends_at),
+      members: mr.data.filter(m => m.challenge_id === c.id),
+      km: Object.fromEntries(pr.data.filter(p => p.challenge_id === c.id).map(p => [p.user_id, Number(p.km)])),
+      cheers: chr.data.filter(x => x.challenge_id === c.id)
+    })).sort((a, b) => a.end - b.end);
+    challenges = { ...challenges, loaded: true, loading: false, error: false, list };
+  } catch (e) { console.error(e); challenges.loading = false; challenges.error = true; }
+  if (screen === 'app' && !draft && !sheetOpen() && !isTyping() && tab !== 'run') render();
+}
+
+// Ranking of everyone who joined, by share of the distance done.
+function standings(c) {
+  const joined = c.members.filter(m => m.status === 'joined').map(m => {
+    const km = c.km[m.user_id] || 0;
+    return { id: m.user_id, km, pct: km / c.distance_km * 100 };
+  }).sort((a, b) => b.km - a.km || unameOf(a.id).localeCompare(unameOf(b.id)));
+  const top = Math.max(1, Math.ceil(joined.length / 2));
+  joined.forEach((x, i) => {
+    x.rank = i + 1;
+    // Leaders (top half, with some distance) get kudos; everyone behind gets encouragement.
+    x.cheerKind = x.pct >= 100 || (i < top && x.km > 0) ? 'kudos' : 'encourage';
+    x.kudos = c.cheers.filter(h => h.to_user === x.id && h.kind === 'kudos').length;
+    x.enc = c.cheers.filter(h => h.to_user === x.id && h.kind === 'encourage').length;
+  });
+  return joined;
+}
+function avatar(id) {
+  let p = null, mood = 'content', stage = 'grown';
+  if (id === profile.id && S && S.pet) { const sim = simulate(S, Date.now()); p = S.pet; mood = moodOf(sim); stage = stageOf(sim.fedKm); }
+  else if (friends.pets[id]) { p = friends.pets[id]; mood = moodOf(simulateSnapshot(p, Date.now())); stage = p.stage; }
+  if (!p) return `<span class="av empty">${esc(unameOf(id).slice(0, 1).toUpperCase())}</span>`;
+  if (mood === 'fainting') mood = 'starving';
+  return `<span class="av">${petSVG(p, mood, stage === 'baby' ? 'kid' : stage, 'av' + id.slice(0, 6) + Math.random().toString(36).slice(2, 6))}</span>`;
+}
+function challengeCard(c) {
+  const t = Date.now(), done = t >= c.end, me = profile.id, mine = myStatus(c);
+  const rows = standings(c);
+  const waiting = c.members.filter(m => m.status === 'invited');
+  const left = done ? `ended ${fmtAgo(c.end, t)}` : `${fmtHours((c.end - t) / H)} left`;
+  const rowHtml = rows.map(x => {
+    const isMe = x.id === me;
+    const given = c.cheers.find(h => h.from_user === me && h.to_user === x.id && h.kind === x.cheerKind);
+    const btn = isMe || mine !== 'joined' ? '' :
+      `<button class="cheer ${x.cheerKind} ${given ? 'sent' : ''}" data-cheer="${c.id}|${x.id}|${x.cheerKind}" ${given ? `data-undo="${given.id}"` : ''}>
+        ${x.cheerKind === 'kudos' ? (given ? '👏 Sent' : '👏 Kudos') : (given ? '💪 Sent' : '💪 Cheer on')}</button>`;
+    const got = [x.kudos ? `👏 ${x.kudos}` : '', x.enc ? `💪 ${x.enc}` : ''].filter(Boolean).join(' · ');
+    return `<li class="${isMe ? 'me' : ''}">
+      <span class="rk">${done && x.rank === 1 && x.km > 0 ? '🏆' : x.rank}</span>
+      ${avatar(x.id)}
+      <span class="body">
+        <span class="line"><b>${isMe ? 'You' : '@' + esc(unameOf(x.id))}</b><span class="pct ${x.pct >= 100 ? 'full' : ''}">${x.pct >= 100 ? '✓ ' : ''}${Math.floor(x.pct)}%</span></span>
+        <span class="pbar"><i style="width:${Math.min(100, x.pct)}%"></i></span>
+        <span class="line small muted"><span>${fmtDist(x.km)} / ${fmtDist(c.distance_km)} km</span><span>${got}</span></span>
+      </span>
+      ${btn}
+    </li>`;
+  }).join('');
+  return `<section class="card ch ${done ? 'done' : ''}">
+    <div class="ch-head">
+      <div><div class="ch-title">${fmtDist(c.distance_km)} km in ${durLabel(c)}</div>
+        <div class="small muted">by ${c.creator === me ? 'you' : '@' + esc(unameOf(c.creator))} · ${left}</div></div>
+      ${(c.creator === me) || (mine === 'joined' && !done) ? `<button class="x" data-chmenu="${c.id}" aria-label="Challenge options">⋯</button>` : ''}
+    </div>
+    ${rows.length ? `<ol class="rank">${rowHtml}</ol>` : '<div class="empty">Nobody has joined yet.</div>'}
+    ${waiting.length && !done ? `<div class="small muted waiting">Waiting for ${waiting.map(m => '@' + esc(unameOf(m.user_id))).join(', ')}</div>` : ''}
+  </section>`;
+}
+function renderChallenge() {
+  const t = Date.now();
+  const invites = challenges.list.filter(c => myStatus(c) === 'invited' && c.end > t);
+  const active = challenges.list.filter(c => myStatus(c) === 'joined' && c.end > t);
+  const past = challenges.list.filter(c => myStatus(c) === 'joined' && c.end <= t).sort((a, b) => b.end - a.end);
+  $('#app').innerHTML = `${header()}
+    <button class="btn primary" id="newCh" style="width:100%;margin-bottom:14px">+ New challenge</button>
+    ${challenges.error ? `<div class="err" style="margin-bottom:10px">Couldn't load challenges. <button class="linkbtn" id="chRetry">Try again</button></div>` : ''}
+    ${invites.length ? `<section class="card"><h2>You've been challenged</h2>${invites.map(c => `
+      <div class="req"><div class="who">@${esc(unameOf(c.creator))}: <span style="font-weight:500">${fmtDist(c.distance_km)} km in ${durLabel(c)}</span>
+        <div class="small muted" style="font-weight:400">${fmtHours((c.end - t) / H)} left · ${c.members.filter(m => m.status === 'joined').length} joined</div></div>
+        <button class="btn small" data-chdec="${c.id}">Decline</button><button class="btn small primary" data-chjoin="${c.id}">Join</button></div>`).join('')}</section>` : ''}
+    ${!challenges.loaded && !challenges.error ? '<div class="empty center">Loading…</div>' :
+      active.length ? active.map(challengeCard).join('') :
+      `<section class="card center"><h2 style="justify-content:center">No running challenges</h2><p class="small muted" style="margin:0">Pick a distance and a time limit, invite friends, and see who gets there first.</p></section>`}
+    ${past.length ? `<details class="card past"><summary><b>Past challenges</b> <span class="small muted">(${past.length})</span></summary>${past.map(challengeCard).join('')}</details>` : ''}`;
+  bindHeader();
+  $('#newCh').onclick = openNewChallenge;
+  if ($('#chRetry')) $('#chRetry').onclick = loadChallenges;
+  document.querySelectorAll('[data-chjoin]').forEach(b => b.onclick = () => answerInvite(b.dataset.chjoin, 'joined'));
+  document.querySelectorAll('[data-chdec]').forEach(b => b.onclick = () => answerInvite(b.dataset.chdec, 'declined'));
+  document.querySelectorAll('[data-cheer]').forEach(b => b.onclick = () => cheer(b));
+  document.querySelectorAll('[data-chmenu]').forEach(b => b.onclick = () => {
+    const c = challenges.list.find(x => x.id === b.dataset.chmenu); if (!c) return;
+    if (c.creator === profile.id) confirmSheet('Delete this challenge?', `${fmtDist(c.distance_km)} km in ${durLabel(c)} disappears for everyone in it.`, 'Delete', async () => {
+      const { error } = await sb.from('challenges').delete().eq('id', c.id);
+      if (error) return toast("Couldn't delete it. Try again.");
+      toast('Challenge deleted.'); loadChallenges();
+    });
+    else confirmSheet('Leave this challenge?', "You'll drop out of the ranking and can't rejoin.", 'Leave', () => answerInvite(c.id, 'declined'));
+  });
+}
+async function answerInvite(cid, status) {
+  const { error } = await sb.from('challenge_members').update({ status }).eq('challenge_id', cid).eq('user_id', profile.id);
+  if (error) return toast("Couldn't do that. Try again.");
+  toast(status === 'joined' ? "You're in! Every km you log now counts." : 'Challenge declined.');
+  loadChallenges();
+}
+async function cheer(btn) {
+  const [cid, to, kind] = btn.dataset.cheer.split('|');
+  btn.disabled = true;
+  const undo = btn.dataset.undo;
+  const { error } = undo
+    ? await sb.from('challenge_cheers').delete().eq('id', undo)
+    : await sb.from('challenge_cheers').insert({ challenge_id: cid, from_user: profile.id, to_user: to, kind });
+  if (error && error.code !== '23505') { btn.disabled = false; return toast("Couldn't send that. Try again."); }
+  if (!undo) toast(kind === 'kudos' ? `👏 Kudos sent to <b>@${esc(unameOf(to))}</b>!` : `💪 You cheered on <b>@${esc(unameOf(to))}</b>.`);
+  loadChallenges();
+}
+function openNewChallenge() {
+  const accepted = friends.rows.filter(r => r.status === 'accepted').map(r => r.requester === profile.id ? r.addressee : r.requester)
+    .sort((a, b) => unameOf(a).localeCompare(unameOf(b)));
+  if (!accepted.length) {
+    return openSheet(`<h3>New challenge</h3><p class="muted">You need at least one friend to challenge. Add friends by their username first.</p>
+      <div class="grid2" style="margin-top:12px"><button class="btn" id="nc0">Close</button><button class="btn primary" id="nc1">Add friends</button></div>`, el => {
+      el.querySelector('#nc0').onclick = closeSheet;
+      el.querySelector('#nc1').onclick = () => { closeSheet(); tab = 'friends'; render(); };
+    });
+  }
+  const st = { km: 20, dur: '1w', sel: new Set() };
+  const draw = el => {
+    const d = DURATIONS.find(x => x.k === st.dur);
+    el.innerHTML = `<h3>New challenge</h3>
+      <div class="field" style="margin-top:0"><label for="ckm">Distance (km)</label>
+        <input id="ckm" class="text mono" inputmode="decimal" value="${st.km || ''}" autocomplete="off">
+        <div class="chips" style="margin-top:8px">${DIST_PRESETS.map(k => `<button class="chip ${st.km === k ? 'sel' : ''}" data-km="${k}">${k} km</button>`).join('')}</div></div>
+      <div class="field"><span class="lbl">Time limit</span><div class="chips">${DURATIONS.map(x => `<button class="chip ${st.dur === x.k ? 'sel' : ''}" data-dur="${x.k}">${x.label}</button>`).join('')}</div></div>
+      <div class="field"><span class="lbl">Challenge <button class="linkbtn" id="selAll" style="margin-left:6px">${st.sel.size === accepted.length ? 'Select none' : 'Select all'}</button></span>
+        <div class="chips">${accepted.map(id => `<button class="chip ${st.sel.has(id) ? 'sel' : ''}" data-fr="${id}">@${esc(unameOf(id))}</button>`).join('')}</div></div>
+      <p class="small muted" style="margin:14px 0 0">${st.km > 0 ? `Run <b>${fmtDist(st.km)} km</b> within <b>${d.label}</b>, starting now. Only runs from now on count.` : 'Enter a distance.'}</p>
+      <div class="err" id="cerr2"></div>
+      <div class="grid2" style="margin-top:6px"><button class="btn" id="ncx">Cancel</button><button class="btn primary" id="ncgo">Send challenge</button></div>`;
+    const kmIn = el.querySelector('#ckm');
+    kmIn.addEventListener('change', () => { st.km = parseFloat(kmIn.value.replace(',', '.')) || 0; draw(el); });
+    el.querySelectorAll('[data-km]').forEach(b => b.onclick = () => { st.km = +b.dataset.km; draw(el); });
+    el.querySelectorAll('[data-dur]').forEach(b => b.onclick = () => { st.km = parseFloat(kmIn.value.replace(',', '.')) || 0; st.dur = b.dataset.dur; draw(el); });
+    el.querySelectorAll('[data-fr]').forEach(b => b.onclick = () => { st.km = parseFloat(kmIn.value.replace(',', '.')) || 0; st.sel.has(b.dataset.fr) ? st.sel.delete(b.dataset.fr) : st.sel.add(b.dataset.fr); draw(el); });
+    el.querySelector('#selAll').onclick = () => { st.km = parseFloat(kmIn.value.replace(',', '.')) || 0; st.sel = st.sel.size === accepted.length ? new Set() : new Set(accepted); draw(el); };
+    el.querySelector('#ncx').onclick = closeSheet;
+    el.querySelector('#ncgo').onclick = async () => {
+      st.km = parseFloat(kmIn.value.replace(',', '.')) || 0;
+      const err = el.querySelector('#cerr2');
+      if (!(st.km > 0) || st.km > 1000) { err.textContent = 'Pick a distance between 0 and 1000 km.'; return; }
+      if (!st.sel.size) { err.textContent = 'Choose at least one friend to challenge.'; return; }
+      const go = el.querySelector('#ncgo'); go.disabled = true;
+      const id = newId();
+      const { error } = await sb.from('challenges').insert({ id, creator: profile.id, distance_km: Math.round(st.km * 10) / 10, ends_at: new Date(Date.now() + d.days * D).toISOString() });
+      if (error) { go.disabled = false; err.textContent = "Couldn't create the challenge. Try again."; return; }
+      const rows = [{ challenge_id: id, user_id: profile.id, status: 'joined' }, ...[...st.sel].map(u => ({ challenge_id: id, user_id: u, status: 'invited' }))];
+      const { error: e2 } = await sb.from('challenge_members').insert(rows);
+      if (e2) { await sb.from('challenges').delete().eq('id', id); go.disabled = false; err.textContent = "Couldn't invite your friends. Try again."; return; }
+      closeSheet();
+      toast(`Challenge sent to ${[...st.sel].map(u => '<b>@' + esc(unameOf(u)) + '</b>').join(', ')}!`);
+      loadChallenges();
+    };
+  };
+  openSheet('', draw);
+}
+
 /* ============ add run ============ */
 function openAddRun() {
   openSheet(`<h3>Log a run</h3>
@@ -833,7 +1037,8 @@ function openAddRun() {
         const km = parseFloat(k.value.replace(',', '.'));
         const durRaw = el.querySelector('#rd').value.replace(',', '.').trim();
         const dur = durRaw ? parseFloat(durRaw) : null;
-        const when = new Date(el.querySelector('#rt').value).getTime();
+        let when = new Date(el.querySelector('#rt').value).getTime();
+        if (when <= now() && now() - when < 60000) when = now(); // "now" (the picker only has minutes)
         const err = el.querySelector('#rerr');
         if (!(km > 0) || km > 400) { err.textContent = 'Enter a distance between 0 and 400 km.'; return; }
         if (durRaw && !(dur > 0)) { err.textContent = 'Time should be a number of minutes.'; return; }
@@ -861,6 +1066,7 @@ function render() {
   if (!S || !S.pet) { draft = newDraft(); return renderCreator(false); }
   if (tab === 'friends' && mode === 'cloud') return renderFriends();
   if (tab === 'run' && mode === 'cloud') return renderRun();
+  if (tab === 'challenge' && mode === 'cloud') return renderChallenge();
   return renderPet();
 }
 
@@ -871,7 +1077,7 @@ setInterval(() => {
   render();
   if (open) document.querySelector('details.settings').open = true;
 }, 60000);
-setInterval(() => { if (mode === 'cloud' && screen === 'app') loadFriends(); }, 5 * 60000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode === 'cloud' && screen === 'app') loadFriends(); });
+setInterval(() => { if (mode === 'cloud' && screen === 'app') { loadFriends(); loadChallenges(); } }, 5 * 60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode === 'cloud' && screen === 'app') { loadFriends(); loadChallenges(); } });
 
 boot();
