@@ -773,18 +773,28 @@ function renderRun() {
   const sky = skyFor(new Date().getHours());
   const LANES = [{ b: 44, z: 3, s: 1 }, { b: 70, z: 1, s: .86 }, { b: 20, z: 5, s: 1.08 }]; // middle, back, front
   const base = n > 8 ? 70 : n > 4 ? 84 : 100;
-  const pos = i => n === 1 ? 50 : 82 - i * (68 / (n - 1));
+  // Pets with the same status run as a tight group; a new status starts a gap.
+  const STEP = 1.4, GAP = 3.6;
+  const units = []; let u = 0, laneIdx = [], li = 0;
+  list.forEach((x, i) => {
+    if (i > 0) { const same = x.mood === list[i - 1].mood; u += same ? STEP : GAP; li = same ? li + 1 : 0; }
+    units.push(u); laneIdx.push(li);
+  });
+  const span = u, per = span ? Math.min(68 / span, 9) : 0; // % of scene width per unit
+  const lead = 50 + span * per / 2;                          // keep the pack centred
+  const pos = i => lead - units[i] * per;
   const label = x => x.mood === 'dead' ? 'starved' : x.mood === 'fainting' ? 'fainted' : x.mood === 'starving' ? 'starving' : x.mood === 'hungry' ? 'hungry' : x.mood === 'content' ? 'fine' : 'strong';
   const runnerHtml = list.map((x, i) => {
-    const lane = LANES[i % 3];
+    const lane = LANES[laneIdx[i] % 3];
     const w = Math.round(base * lane.s);
     const spd = (0.75 - Math.max(0, x.strength) / 100 * 0.4).toFixed(2);
     return `<div class="runner ${x.me ? 'me' : ''} ${x.mood}" style="left:${pos(i)}%;bottom:${lane.b}px;width:${w}px;z-index:${lane.z + 10};--spd:${spd}s">
       ${x.mood !== 'dead' && x.mood !== 'fainting' && x.strength >= 70 ? '<div class="dust"><i></i><i></i><i></i></div>' : ''}
       ${petSVG(x.pet, x.mood, x.stage, 'r' + x.key.slice(0, 8), true)}
-      <div class="tag">${x.me ? '<b>You</b> · ' : ''}${esc(x.pet.name)}</div>
     </div>`;
   }).join('');
+  // Name tags live on their own layer so no pet ever covers them.
+  const tagHtml = list.map((x, i) => `<div class="tag ${x.me ? 'me' : ''}" style="left:${pos(i)}%;bottom:${LANES[laneIdx[i] % 3].b - 14}px">${x.me ? '<b>You</b> · ' : ''}${esc(x.pet.name)}</div>`).join('');
   const rows = list.map((x, i) => `
     <li class="${x.me ? 'me' : ''}">
       <span class="rank">${i + 1}</span>
@@ -795,7 +805,7 @@ function renderRun() {
     <div class="scene ${sky.night ? 'night' : ''}" style="background:${sky.bg}">
       ${sky.orb}
       ${sceneLayers(sky.night)}
-      ${n ? runnerHtml : ''}
+      ${n ? runnerHtml + tagHtml : ''}
       ${n <= 1 ? `<div class="scene-note">${!friends.loaded && !friends.error ? 'Loading friends…' : 'Add friends to run together!'}</div>` : ''}
     </div>
     <p class="small muted center" style="margin:8px 0 14px">Strongest pets lead the pack, the weakest trail behind. Strength = how full a pet is, plus its level.</p>
