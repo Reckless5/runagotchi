@@ -150,7 +150,7 @@ async function corosClientRow(db: SupabaseClient) {
 }
 const coros: Provider = {
   id: "coros", name: "COROS",
-  enabled: () => env("COROS_DISABLED") !== "1",
+  enabled: () => env("COROS_ENABLED") === "1", // off until the COROS connection works; set the COROS_ENABLED=1 secret to turn it on
   async client(db) {
     const c = await corosClientRow(db);
     return {
@@ -578,6 +578,7 @@ async function handleAction(req: Request, db: SupabaseClient) {
     return json({ ok: true });
   }
   if (body.action === "sync") {
+    if (!p.enabled()) return json({ imported: 0, note: `${p.name} is switched off right now.` });
     if (p.id === "coros") return json(await syncCoros(db, user.id));
     if (p.id === "suunto") return json(await syncSuunto(db, user.id));
     return json({ imported: 0, note: `${p.name} sends new runs automatically.` });
@@ -662,6 +663,7 @@ async function handleWebhook(req: Request, url: URL, p: Provider, db: SupabaseCl
 // Scheduled: fetch new COROS runs for everyone who hasn't synced in a while.
 async function handleCron(url: URL, db: SupabaseClient) {
   if (!safeEqual(url.searchParams.get("key") ?? "", WEBHOOK_KEY)) return json({ error: "forbidden" }, 403);
+  if (!PROVIDERS.coros.enabled()) return json({ imported: 0, failed: 0, note: "COROS is switched off" });
   const stale = new Date(Date.now() - 25 * 60000).toISOString();
   const { data: links } = await db.from("watch_links").select("user_id,last_sync_at").eq("provider", "coros")
     .or(`last_sync_at.is.null,last_sync_at.lt.${stale}`).order("last_sync_at", { ascending: true, nullsFirst: true }).limit(25);

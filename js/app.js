@@ -1214,7 +1214,10 @@ function watchesCard() {
   const row = id => {
     const link = watches.links[id], on = watches.enabled[id];
     let status, btn;
-    if (link) {
+    if (link && !on) {
+      status = 'Paused for now';
+      btn = `<button class="btn small" data-woff="${id}">Disconnect</button>`;
+    } else if (link) {
       status = `<span class="ok-dot"></span>Connected${link.last_sync_at ? ` · synced ${fmtAgo(Date.parse(link.last_sync_at), Date.now())}` : ' · waiting for your next run'}`;
       btn = `${id !== 'garmin' ? `<button class="btn small" data-wsync="${id}">Sync</button>` : ''}<button class="btn small" data-woff="${id}">Disconnect</button>`;
     } else if (on) {
@@ -1224,14 +1227,14 @@ function watchesCard() {
       status = 'Coming soon';
       btn = '';
     }
-    const diag = link && id === 'coros' ? `<button class="linkbtn small diag" data-wdiag="${id}">Check connection</button>` : '';
+    const diag = link && on && id === 'coros' ? `<button class="linkbtn small diag" data-wdiag="${id}">Check connection</button>` : '';
     return `<div class="wrow"><div class="wlogo ${id}">${WATCH_NAMES[id]}</div><div class="wstat small ${link ? '' : 'muted'}"><span>${status}${diag}</span></div><div class="wbtns">${btn}</div></div>`;
   };
   return `<section class="card">
     <h2>Your watches</h2>
     ${['garmin', 'coros', 'suunto'].map(row).join('')}
     <p class="small muted" style="margin:10px 0 0">${Object.values(watches.links).length
-      ? `New runs from your watch feed your pet automatically after it syncs with the brand's app${watches.links.coros ? ' (COROS is checked every 30 minutes and when you open the app)' : ''}. Only runs from after connecting count.`
+      ? `New runs from your watch feed your pet automatically after it syncs with the brand's app${watches.links.coros && watches.enabled.coros ? ' (COROS is checked every 30 minutes and when you open the app)' : ''}. Only runs from after connecting count.`
       : 'Connect your watch and your runs feed your pet automatically. Brands marked "coming soon" are waiting for approval.'}</p>
   </section>`;
 }
@@ -1263,7 +1266,7 @@ function bindWatches() {
 let corosSyncing = false, corosAutoAt = 0;
 async function autoSyncCoros() {
   const link = watches.links.coros;
-  if (!link || corosSyncing || Date.now() - corosAutoAt < 10 * 60000) return;
+  if (!link || !watches.enabled.coros || corosSyncing || Date.now() - corosAutoAt < 10 * 60000) return;
   if (link.last_sync_at && Date.now() - Date.parse(link.last_sync_at) < 10 * 60000) return;
   corosSyncing = true; corosAutoAt = Date.now();
   try {

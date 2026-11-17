@@ -1,6 +1,6 @@
 // End-to-end test of the COROS (MCP) connection against a fake COROS server
 // and an in-memory database. Run:
-//   RUNAGOTCHI_TEST=1 WEBHOOK_KEY=k SUPABASE_URL=http://fn.test SUPABASE_SERVICE_ROLE_KEY=x \
+//   RUNAGOTCHI_TEST=1 COROS_ENABLED=1 WEBHOOK_KEY=k SUPABASE_URL=http://fn.test SUPABASE_SERVICE_ROLE_KEY=x \
 //   COROS_MCP_URL=http://localhost:8799/mcp deno test --allow-env --allow-net coros_flow_test.ts
 import { deepStrictEqual as eq, ok } from "node:assert";
 import { handler, __test, extractActivities, activityArgs, pickActivityTool, parseSse, jwtSubject } from "./index.ts";
