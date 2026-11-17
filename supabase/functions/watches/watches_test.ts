@@ -46,6 +46,8 @@ Deno.test("webhook rejects a wrong key, unknown routes 404", async () => {
   assertEquals(r1.status, 403);
   const r2 = await handler(new Request("http://x/functions/v1/watches/whatever/zzz"));
   assertEquals(r2.status, 404);
+  const r4 = await handler(new Request("http://x/functions/v1/watches/status"));
+  assertEquals(r4.status, 200); assertEquals((await r4.json()).ok, true);
   const r3 = await handler(new Request("http://x/functions/v1/watches", { method: "OPTIONS" }));
   assertEquals(r3.status, 200);
 });

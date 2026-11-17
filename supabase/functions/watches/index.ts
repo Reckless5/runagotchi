@@ -11,6 +11,7 @@
 //   GET  /watches/callback/<provider>                   the brand sends the user back here after login
 //   POST /watches/webhook/<provider>?key=WEBHOOK_KEY    Garmin/Suunto push new activities here
 //   POST /watches/cron?key=WEBHOOK_KEY                  scheduled: fetch new COROS runs for everyone
+//   GET  /watches/status                                health check for the brands (always "ok")
 //
 // Garmin and Suunto switch on when their secrets are set (Edge Functions → Secrets).
 // COROS uses its self-service connection (OAuth 2.0 + MCP, no approval needed):
@@ -654,6 +655,7 @@ export async function handler(req: Request): Promise<Response> {
   try {
     if (!route && req.method === "POST") return await handleAction(req, db);
     if (route === "cron" && req.method === "POST") return await handleCron(url, db);
+    if (route === "status" && req.method === "GET") return json({ ok: true, service: "runagotchi-watches", time: new Date().toISOString() });
     const p = PROVIDERS[pid as ProviderId];
     if (!p) return json({ error: "not found" }, 404);
     if (route === "callback" && req.method === "GET") return await handleCallback(url, p, db);
