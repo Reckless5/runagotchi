@@ -628,6 +628,8 @@ async function handleWebhook(req: Request, url: URL, p: Provider, db: SupabaseCl
 
   if (p.id === "garmin") {
     const { byUser, deregistered } = parseGarminPush(body);
+    // Shape only (no personal data), to check what Garmin sends: e.g. "garmin push", ["activities"], 1, 0
+    console.log("garmin push", Object.keys(body ?? {}), Object.values(byUser).flat().length, deregistered.length);
     for (const [gid, acts] of Object.entries(byUser)) {
       const uid = await userForProviderAccount(db, "garmin", gid);
       if (uid) imported += await importActivities(db, uid, "garmin", acts);
