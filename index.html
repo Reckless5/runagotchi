@@ -317,6 +317,30 @@ section.card.dbg{border:2px dashed #c9b28a;background:#fffdf6}
 .say-mine{margin:2px 2px 0}
 .msg-note{color:#5d5546;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+/* sick / injured */
+.cond{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:#ece3d2;border-radius:14px;padding:4px;margin:12px auto 0;max-width:360px}
+.cond button{border:0;background:transparent;border-radius:10px;padding:8px 4px;font-weight:600;font-size:14px;color:var(--muted)}
+.cond button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.m-rest{animation:breathe 4.5s ease-in-out infinite}
+.cond-note{color:#7a6a2f}
+/* the cart */
+.cart{position:absolute;bottom:18px;z-index:16;transform:translateX(-50%);height:calc(var(--rw) * 1.2);transition:left 1.2s ease}
+.cart .riders{position:absolute;left:6px;right:20px;bottom:calc(14px + var(--rw) * .27);display:flex;justify-content:center;gap:0;z-index:1}
+.cart .rider{width:var(--rw);margin:0 calc(var(--rw) * -.09)}
+.cart .rider svg{width:100%;height:auto;display:block}
+.cart .box{position:absolute;left:2px;right:18px;bottom:14px;height:calc(var(--rw) * .42);z-index:2;border-radius:6px 6px 10px 10px;
+  background:repeating-linear-gradient(90deg,#b77a48 0 18px,#a56b3d 18px 20px);border:2px solid #7a4b2a;box-shadow:inset 0 4px 0 rgba(255,255,255,.15)}
+.cart .handle{position:absolute;right:0;bottom:calc(14px + var(--rw) * .2);width:22px;height:4px;background:#7a4b2a;border-radius:2px;transform:rotate(-12deg);z-index:2}
+.cart .hitch{position:absolute;right:-3px;bottom:calc(14px + var(--rw) * .2 + 3px);width:6px;height:6px;border-radius:50%;background:#7a4b2a;z-index:2}
+.cart .wheel{position:absolute;bottom:0;width:28px;height:28px;border-radius:50%;background:#5a3a22;border:3px solid #3e2716;z-index:3;animation:spin .9s linear infinite}
+.cart .wheel i{position:absolute;inset:3px;border-radius:50%;background:conic-gradient(#c8935f 0 8deg,transparent 8deg 90deg,#c8935f 90deg 98deg,transparent 98deg 180deg,#c8935f 180deg 188deg,transparent 188deg 270deg,#c8935f 270deg 278deg,transparent 278deg)}
+.cart .w1{left:10%}.cart .w2{right:24%}
+.cart.parked .wheel{animation:none}
+.scene .tag.cart-tag{z-index:41;max-width:none}
+.cart-note{top:auto;bottom:118px;font-size:12px}
+.ropes{position:absolute;inset:0;width:100%;height:100%;z-index:17;pointer-events:none;overflow:visible}
+@media (prefers-reduced-motion:reduce){.cart .wheel,.m-rest{animation:none}}
+
 /* pet animation */
 .pet-anim{transform-box:fill-box;transform-origin:50% 100%}
 .m-happy{animation:bounce 1.1s ease-in-out infinite}

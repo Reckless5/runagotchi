@@ -37,6 +37,17 @@ Deno.test("pet simulation matches the app", () => {
   assertEquals(s4.dead, false); assertEquals(s4.f, 60);
 });
 
+Deno.test("sick/injured pauses hunger and the fainting countdown", () => {
+  const H = 3.6e6;
+  const base = simulate(0, "normal", [], 24 * H);
+  const rested = simulate(0, "normal", [], 24 * H, null, [[0, 12 * H]]);
+  assert(Math.abs(rested.f - (70 - 12 * 200 / 168)) < 1e-9 && rested.f > base.f);
+  const open = simulate(0, "normal", [], 500 * H, null, [[10 * H, Infinity]]);
+  assert(!open.dead && open.f > 0); // resting forever: never starves
+  const faintedThenSick = simulate(0, "normal", [], 200 * H, null, [[70 * H, 190 * H]]); // empty at ~58.8 h, rest 120 h
+  assertEquals(faintedThenSick.dead, false);
+});
+
 Deno.test("PKCE challenge = base64url(sha256(verifier))", async () => {
   assertEquals(await pkceChallenge("dBjftJeZ4CVP-mJ92K-cz2pd6GRkwzbtbRjjtN8sAhs"), "ZdyYAF_FCMLs9Fcl68oTtE02hePOYOalGf_chK1c4Uk");
 });

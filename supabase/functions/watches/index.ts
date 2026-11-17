@@ -346,7 +346,7 @@ export function suuntoWorkoutToActivity(w: any): Activity | null {
 
 const FOOD_PER_KM = 10, MAX_FOOD = 100, START_FOOD = 70, GRACE_H = 72, REVIVE_KM = 5;
 const WEEK_KM: Record<string, number> = { easy: 10, normal: 20, hard: 35 };
-export function simulate(bornMs: number, difficulty: string, runs: { date: number; km: number }[], tNow: number, debug?: { food: number; at: number } | null) {
+export function simulate(bornMs: number, difficulty: string, runs: { date: number; km: number }[], tNow: number, debug?: { food: number; at: number } | null, rests: [number, number][] = []) {
   const decayH = (WEEK_KM[difficulty] ?? 20) * FOOD_PER_KM / 7 / 24;
   let t = bornMs, f = START_FOOD, dead = false, zeroAt: number | null = null, deathAt: number | null = null, fedKm = 0;
   if (debug) { // test accounts: "at debug.at the pet had debug.food food"
@@ -354,7 +354,7 @@ export function simulate(bornMs: number, difficulty: string, runs: { date: numbe
     t = debug.at; f = Math.max(0, Math.min(MAX_FOOD, debug.food)); if (f === 0) zeroAt = t;
     runs = runs.filter((r) => r.date >= debug.at);
   }
-  const adv = (to: number) => {
+  const decay = (to: number) => {
     if (to <= t) return;
     if (!dead) {
       const h = (to - t) / H;
@@ -362,6 +362,20 @@ export function simulate(bornMs: number, difficulty: string, runs: { date: numbe
       if (f === 0 && zeroAt !== null && to - zeroAt >= GRACE_H * H) { dead = true; deathAt = zeroAt + GRACE_H * H; }
     }
     t = to;
+  };
+  // Sick or injured: hunger (and the fainting countdown) is paused.
+  const sortedRests = rests.filter((r) => r[1] > r[0]).sort((a, b) => a[0] - b[0]);
+  const adv = (to: number) => {
+    if (to <= t) return;
+    for (const [a, b] of sortedRests) {
+      if (b <= t || a >= to) continue;
+      if (a > t) decay(a);
+      const end = Math.min(b, to);
+      if (!dead && f === 0 && zeroAt !== null) zeroAt += end - t;
+      t = end;
+      if (t >= to) return;
+    }
+    decay(to);
   };
   for (const r of runs.filter((r) => r.date >= bornMs && r.date <= tNow).sort((a, b) => a.date - b.date)) {
     adv(r.date);
@@ -380,7 +394,9 @@ async function refreshSnapshot(db: SupabaseClient, userId: string) {
   const { data: runs } = await db.from("runs").select("started_at,km").eq("user_id", userId);
   const now = Date.now();
   const debug = pet.debug_at && pet.debug_food != null ? { food: Number(pet.debug_food), at: Date.parse(pet.debug_at) } : null;
-  const sim = simulate(Date.parse(pet.born_at), pet.difficulty, (runs ?? []).map((r) => ({ date: Date.parse(r.started_at), km: Number(r.km) })), now, debug);
+  const rests: [number, number][] = (Array.isArray(pet.rest_periods) ? pet.rest_periods : []).map((x: string[]) => [Date.parse(x[0]), Date.parse(x[1])] as [number, number]);
+  if (pet.condition && pet.condition_since) rests.push([Date.parse(pet.condition_since), Infinity]);
+  const sim = simulate(Date.parse(pet.born_at), pet.difficulty, (runs ?? []).map((r) => ({ date: Date.parse(r.started_at), km: Number(r.km) })), now, debug, rests);
   const iso = (t: number | null) => t == null ? null : new Date(t).toISOString();
   await db.from("pets").update({
     food: Math.round(sim.f * 100) / 100, zero_at: iso(sim.zeroAt), dead: sim.dead, death_at: iso(sim.deathAt),

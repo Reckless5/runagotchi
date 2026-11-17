@@ -63,7 +63,7 @@ function simulate(st, tNow) {
     t = p.debugAt; f = Math.max(0, Math.min(MAX_FOOD, p.debugFood)); if (f === 0) zeroAt = t;
   }
   const from = ov ? p.debugAt : p.createdAt;
-  const adv = to => {
+  const decay = to => {
     if (to <= t) return;
     if (!dead) {
       const h = (to - t) / H;
@@ -75,6 +75,20 @@ function simulate(st, tNow) {
       if (f === 0 && zeroAt !== null && to - zeroAt >= GRACE_H * H) { dead = true; deathAt = zeroAt + GRACE_H * H; }
     }
     t = to;
+  };
+  // Sick or injured: hunger (and the fainting countdown) is paused.
+  const rests = restPeriodsOf(p);
+  const adv = to => {
+    if (to <= t) return;
+    for (const [a, b] of rests) {
+      if (b <= t || a >= to) continue;
+      if (a > t) decay(a);
+      const end = Math.min(b, to);
+      if (!dead && f === 0 && zeroAt !== null) zeroAt += end - t;
+      t = end;
+      if (t >= to) return;
+    }
+    decay(to);
   };
   const runs = st.runs.filter(r => r.date >= from && r.date <= tNow).sort((a, b) => a.date - b.date);
   for (const r of runs) {
@@ -90,10 +104,17 @@ function simulate(st, tNow) {
   adv(tNow);
   return { f, dead, zeroAt, deathAt, fedKm, lastFeed, decayH, revives };
 }
+function restPeriodsOf(p) {
+  const list = (p.restPeriods || []).filter(r => r[1] > r[0]);
+  if (p.condition && p.conditionSince) list.push([p.conditionSince, Infinity]);
+  return list.sort((a, b) => a[0] - b[0]);
+}
 // A friend's pet: continue the countdown from the snapshot their app saved.
 function simulateSnapshot(row, tNow) {
   const decayH = DIFF[row.difficulty].km * FOOD_PER_KM / 7 / 24;
   const t0 = Date.parse(row.snapshot_at);
+  // A sick or injured pet doesn't get hungrier.
+  if (row.condition && row.condition_since) tNow = Math.max(t0, Math.min(tNow, Date.parse(row.condition_since)));
   let f = Number(row.food), dead = !!row.dead;
   let zeroAt = row.zero_at ? Date.parse(row.zero_at) : null, deathAt = row.death_at ? Date.parse(row.death_at) : null;
   if (!dead && tNow > t0) {
@@ -115,6 +136,11 @@ const stageOf = km => km < 25 ? 'baby' : km < 100 ? 'kid' : 'grown';
 const levelOf = km => Math.floor(Math.sqrt(km / 2)) + 1;
 
 /* ============ pet drawing ============ */
+function mixHex(a, b, t) {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const ch = (x, s) => (x >> s) & 255, m = s => Math.round(ch(pa, s) * (1 - t) + ch(pb, s) * t);
+  return '#' + [m(16), m(8), m(0)].map(v => v.toString(16).padStart(2, '0')).join('');
+}
 function shade(hex, amt) {
   const n = parseInt(hex.slice(1), 16);
   const r = n >> 16, g = (n >> 8) & 255, b = n & 255;
@@ -124,7 +150,9 @@ function shade(hex, amt) {
 function petSVG(p, mood, stage, id, run = false) {
   const sh = SHAPES[p.shape] || SHAPES.blob;
   const dead = mood === 'dead';
-  const col = dead ? '#d6d6d0' : (COLORS[p.color] || COLORS.tangerine);
+  const cond = dead ? null : (p.condition || null); // 'sick' | 'injured'
+  const baseCol = COLORS[p.color] || COLORS.tangerine;
+  const col = dead ? '#d6d6d0' : cond === 'sick' ? mixHex(baseCol, '#b5d68a', 0.45) : baseCol;
   const dark = shade(col, -0.35), ink = '#2b2a22';
   const scale = { baby: .72, kid: .86, grown: 1 }[stage] || 1;
   const ey = sh.face, ex = sh.ex, L = 100 - ex, R = 100 + ex;
@@ -165,17 +193,29 @@ function petSVG(p, mood, stage, id, run = false) {
       extra = `<ellipse cx="100" cy="${sh.top - 14}" rx="26" ry="7" fill="none" stroke="#c9a227" stroke-width="4"/>`;
       break;
   }
+  if (cond === 'sick') { // droopy eyes, flushed cheeks, thermometer, sweat
+    eyes = [L, R].map(x => `<path d="M${x - 8} ${ey - 1}h16" stroke="${ink}" stroke-width="3.5" stroke-linecap="round"/><path d="M${x - 6} ${ey}q6 6 12 0" fill="${ink}"/>`).join('');
+    mouth = `<ellipse cx="96" cy="${ey + 19}" rx="5" ry="3.5" fill="${ink}"/><g transform="rotate(-24 98 ${ey + 19})"><rect x="98" y="${ey + 17}" width="34" height="5" rx="2.5" fill="#f4f4f4" stroke="#9aa" stroke-width="1"/><rect x="99" y="${ey + 18}" width="16" height="3" rx="1.5" fill="#e8403a"/><circle cx="133" cy="${ey + 19.5}" r="4" fill="#e8403a"/></g>`;
+    extra = `<ellipse cx="${L - 9}" cy="${ey + 12}" rx="9" ry="5.5" fill="#ff5a5a" opacity=".55"/><ellipse cx="${R + 9}" cy="${ey + 12}" rx="9" ry="5.5" fill="#ff5a5a" opacity=".55"/><path d="M${L - 20} ${ey - 22}q-6 10 0 13q6 -3 0 -13z" fill="#6fb6ff"/>`;
+  }
+  if (cond === 'injured') { // pained squint, small frown, plaster on the head, bandaged foot
+    eyes = `<path d="M${L - 7} ${ey - 6}l10 6l-10 6" fill="none" stroke="${ink}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M${R + 7} ${ey - 6}l-10 6l10 6" fill="none" stroke="${ink}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+    mouth = `<path d="M91 ${ey + 21}q9 -8 18 0" fill="none" stroke="${ink}" stroke-width="3.5" stroke-linecap="round"/>`;
+    extra = `<g transform="translate(${100 - sh.ex - 4} ${sh.top + 18}) rotate(-20)"><rect x="-15" y="-5" width="30" height="10" rx="5" fill="#f2c79b" stroke="#d9a877" stroke-width="1"/><rect x="-5" y="-15" width="10" height="30" rx="5" fill="#f2c79b" stroke="#d9a877" stroke-width="1"/><rect x="-4" y="-4" width="8" height="8" rx="1.5" fill="#e6b689"/></g>`;
+  }
   let acc = '';
   if (p.acc === 'cap') acc = `<path d="M${100 - 34} ${sh.top + 10}q34 -34 68 0z" fill="#2d4f9e"/><path d="M${100 + 30} ${sh.top + 8}q26 2 30 10q-16 2 -32 -2z" fill="#1f3a78"/><circle cx="100" cy="${sh.top - 7}" r="4" fill="#fff"/>`;
   if (p.acc === 'sprout') acc = `<path d="M100 ${sh.top + 2}v-18" stroke="#3f8f4f" stroke-width="4" stroke-linecap="round"/><path d="M100 ${sh.top - 14}q-18 -12 -24 2q14 8 24 -2z" fill="#5fbf6f"/><path d="M100 ${sh.top - 16}q16 -14 24 -2q-12 10 -24 2z" fill="#4caf5f"/>`;
   if (p.acc === 'bow') acc = `<g transform="translate(${100 + 26} ${sh.top + 10}) rotate(18)"><path d="M0 0l-16 -10v20z" fill="#ff4f8b"/><path d="M0 0l16 -10v20z" fill="#ff4f8b"/><circle r="5" fill="#e0306f"/></g>`;
-  const running = run && mood !== 'dead' && mood !== 'fainting';
-  const feet = dead ? '' : `<ellipse class="fl" cx="78" cy="175" rx="14" ry="7" fill="${dark}"/><ellipse class="fr" cx="122" cy="175" rx="14" ry="7" fill="${dark}"/>`;
+  const running = run && mood !== 'dead' && mood !== 'fainting' && !p.condition;
+  const feet = dead ? '' : cond === 'injured'
+    ? `<g class="fl"><ellipse cx="78" cy="175" rx="15" ry="8" fill="#fbfbf7" stroke="#cfcfc4" stroke-width="1.5"/><path d="M66 172h24M65 177h26" stroke="#d8d8cc" stroke-width="1.5"/></g><ellipse class="fr" cx="122" cy="175" rx="14" ry="7" fill="${dark}"/>`
+    : `<ellipse class="fl" cx="78" cy="175" rx="14" ry="7" fill="${dark}"/><ellipse class="fr" cx="122" cy="175" rx="14" ry="7" fill="${dark}"/>`;
   return `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <defs><clipPath id="${clip}"><path d="${sh.d}"/></clipPath></defs>
     ${dead ? '' : '<ellipse cx="100" cy="182" rx="56" ry="6" fill="rgba(0,0,0,.13)"/>'}
     <g transform="translate(100 180) scale(${scale}) translate(-100 -180)">
-      <g class="pet-anim ${running ? 'm-run' : 'm-' + mood}">
+      <g class="pet-anim ${running ? 'm-run' : cond ? 'm-rest' : 'm-' + mood}">
         ${feet}
         <path d="${sh.d}" fill="${col}"/>
         <g clip-path="url(#${clip})">${pattern}${band}<path d="${sh.d}" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="10" transform="translate(-4 -6)"/></g>
@@ -194,7 +234,9 @@ const isGuest = () => { try { return localStorage.getItem(LS_GUEST) === '1'; } c
 const setGuest = v => { try { v ? localStorage.setItem(LS_GUEST, '1') : localStorage.removeItem(LS_GUEST); } catch (e) {} };
 
 const rowToPet = r => ({ name: r.name, shape: r.shape, color: r.color, pattern: r.pattern, acc: r.acc, difficulty: r.difficulty, createdAt: Date.parse(r.born_at),
-  debugFood: r.debug_food == null ? null : Number(r.debug_food), debugAt: r.debug_at ? Date.parse(r.debug_at) : null });
+  debugFood: r.debug_food == null ? null : Number(r.debug_food), debugAt: r.debug_at ? Date.parse(r.debug_at) : null,
+  condition: r.condition || null, conditionSince: r.condition_since ? Date.parse(r.condition_since) : null,
+  restPeriods: Array.isArray(r.rest_periods) ? r.rest_periods.map(x => [Date.parse(x[0]), Date.parse(x[1])]).filter(x => !isNaN(x[0]) && !isNaN(x[1])) : [] });
 const rowToRun = r => ({ id: r.id, date: Date.parse(r.started_at), km: Number(r.km), durMin: r.dur_min == null ? null : Number(r.dur_min), source: r.source });
 const runToRow = r => ({ id: r.id, user_id: profile.id, started_at: new Date(r.date).toISOString(), km: r.km, dur_min: r.durMin || null, source: r.source === 'coros' ? 'coros' : 'manual' });
 function snapshotRow() {
@@ -205,12 +247,22 @@ function snapshotRow() {
 }
 function petRow() {
   const p = S.pet;
-  return { user_id: profile.id, name: p.name, shape: p.shape, color: p.color, pattern: p.pattern, acc: p.acc, difficulty: p.difficulty,
+  const row = { user_id: profile.id, name: p.name, shape: p.shape, color: p.color, pattern: p.pattern, acc: p.acc, difficulty: p.difficulty,
     born_at: new Date(p.createdAt).toISOString(), ...snapshotRow() };
+  // Only send the sick/injured fields once they're used, so older databases keep working.
+  if (p.condition || (p.restPeriods && p.restPeriods.length)) Object.assign(row, {
+    condition: p.condition || null, condition_since: p.conditionSince ? new Date(p.conditionSince).toISOString() : null,
+    rest_periods: (p.restPeriods || []).map(([a, b]) => [new Date(a).toISOString(), new Date(b).toISOString()]),
+  });
+  return row;
 }
 async function cloud(op, what) {
   const { error } = await op;
-  if (error) { console.error(what, error); toast(`Couldn't save (${esc(what)}). Check your connection and try again.`); return false; }
+  if (error) {
+    console.error(what, error);
+    toast(/condition|rest_periods/.test(error.message || '') ? 'Almost: run supabase/009_condition.sql in Supabase first.' : `Couldn't save (${esc(what)}). Check your connection and try again.`);
+    return false;
+  }
   return true;
 }
 // All writes go through these, so local and account mode behave the same.
@@ -511,6 +563,7 @@ function bindHeader() {
 function statusLine(sim, p) {
   const n = `<b>${esc(p.name)}</b>`;
   const m = moodOf(sim);
+  if (p.condition && m !== 'dead') return { cls: '', html: `${n} is ${p.condition === 'sick' ? 'sick' : 'injured'} and resting. <b>Hunger is paused</b> until you're better.` };
   const kmToFull = Math.max(0, (MAX_FOOD - sim.f) / FOOD_PER_KM);
   if (m === 'dead') return { cls: 'bad', html: `${n} starved ${fmtAgo(sim.deathAt)}. A run of ${REVIVE_KM} km or more brings it back.` };
   if (m === 'fainting') return { cls: 'bad', html: `${n} fainted from hunger. <b>${fmtHours(GRACE_H - (now() - sim.zeroAt) / H)}</b> left to save it with a run.` };
@@ -543,6 +596,9 @@ function renderPet() {
     </div>
     <div class="petname">${esc(p.name)}</div>
     <div class="status ${st.cls}">${st.html}</div>
+    <div class="cond" role="group" aria-label="How are you?">
+      ${[['', '💪 Healthy'], ['sick', '🤒 Sick'], ['injured', '🩹 Injured']].map(([k, l]) => `<button class="${(p.condition || '') === k ? 'on' : ''}" data-cond="${k}">${l}</button>`).join('')}
+    </div>
 
     <div class="stats">
       <div class="stat"><div class="v">${Math.round(sim.f)}</div><div class="k">food / 100</div></div>
@@ -588,6 +644,7 @@ function renderPet() {
     </section>`;
   bindHeader();
   $('#addRun').onclick = openAddRun;
+  document.querySelectorAll('[data-cond]').forEach(b => b.onclick = () => setCondition(b.dataset.cond || null));
   document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
     const r = S.runs.find(x => x.id === b.dataset.del); if (!r) return;
     confirmSheet('Delete this run?', `${fmtKm(r.km)} km on ${fmtDate(r.date)}. ${esc(p.name)} will un-eat it.`, 'Delete', () => {
@@ -644,6 +701,7 @@ async function loadFriends() {
 }
 function friendStatus(sim, row) {
   const m = moodOf(sim);
+  if (row.condition && m !== 'dead') return { bad: false, txt: row.condition === 'sick' ? '🤒 Sick, resting' : '🩹 Injured, resting' };
   if (m === 'dead') return { bad: true, txt: `Starved. Needs a ${REVIVE_KM} km run.` };
   if (m === 'fainting') return { bad: true, txt: `Fainted! ${fmtHours(GRACE_H - (Date.now() - sim.zeroAt) / H)} left.` };
   if (m === 'starving') return { bad: true, txt: 'Starving!' };
@@ -775,7 +833,7 @@ function runners() {
   list.forEach(x => { x.mood = moodOf(x.sim); x.strength = strengthOf(x.sim, x.level); });
   return list.sort((a, b) => b.strength - a.strength || b.level - a.level || a.pet.name.localeCompare(b.pet.name));
 }
-const runSignature = () => runners().map(x => x.key + ':' + x.mood + ':' + x.strength).join('|') + (friends.loaded ? '' : '…') + [...buddyPairs].sort().join(',') + JSON.stringify(messages);
+const runSignature = () => runners().map(x => x.key + ':' + x.mood + ':' + x.strength + ':' + (x.pet.condition || '')).join('|') + (friends.loaded ? '' : '…') + [...buddyPairs].sort().join(',') + JSON.stringify(messages);
 
 const svgUri = s => `url('data:image/svg+xml,${encodeURIComponent(s)}')`;
 function sceneLayers(night) {
@@ -801,9 +859,12 @@ function skyFor(hour) {
   return { night: false, bg: 'linear-gradient(#7cc4ff, #bfe3ff 65%, #e6f5ff)', orb: '<div class="sun"></div>' };
 }
 function renderRun() {
-  const ranked = runners();
+  const everyone = runners();
+  // Sick and injured pets ride in a cart; everyone else runs.
+  const isRider = x => !!x.pet.condition && x.mood !== 'dead';
+  const riders = everyone.filter(isRider), ranked = everyone.filter(x => !isRider(x));
   lastRunSig = runSignature();
-  const n = ranked.length;
+  const n = ranked.length, N = everyone.length;
   const sky = skyFor(new Date().getHours());
   // Buddies who ran together this week form one group: the group runs where its
   // strongest member would, and its members run side by side.
@@ -828,7 +889,7 @@ function renderRun() {
   });
   const list = order.map(i => ranked[i]), group = order.map(i => root(i));
   const LANES = [{ b: 44, z: 3, s: 1 }, { b: 70, z: 1, s: .86 }, { b: 20, z: 5, s: 1.08 }]; // middle, back, front
-  const base = n > 8 ? 70 : n > 4 ? 84 : 100;
+  const base = N > 8 ? 70 : N > 4 ? 84 : 100;
   // Pets with the same status run as a tight group; a new status starts a gap.
   const STEP = 1.4, GAP = 3.6, BUDDY = 1.2;
   const units = []; let u = 0, laneIdx = [], li = 0;
@@ -839,15 +900,30 @@ function renderRun() {
     }
     units.push(u); laneIdx.push(li);
   });
-  const span = u, per = span ? Math.min(68 / span, 9) : 0; // % of scene width per unit
-  const lead = 50 + span * per / 2;                          // keep the pack centred
+  // The cart trails the pack: keep room for it on the left so it stays on screen.
+  const sceneW = Math.max(280, Math.min(480, ($('#app') && $('#app').clientWidth) || 420) - 32);
+  const riderW = Math.round(base * 0.62), cartW = Math.round(riderW * 0.82 * riders.length + riderW * 0.35 + 22);
+  const cartPct = riders.length ? cartW / sceneW * 100 : 0;
+  const left = riders.length ? 3 + cartPct + 7 : 16, right = 84;
+  const span = u, per = span ? Math.min((right - left) / span, 9) : 0; // % of scene width per unit
+  const lead = (left + right) / 2 + span * per / 2;                    // keep the pack centred in its space
   const pos = i => lead - units[i] * per;
+  const cartX = !riders.length ? null : n ? Math.max(2 + cartPct / 2, lead - span * per - 7 - cartPct / 2) : 50;
+  // The last healthy runners (not fainted or starved) pull the cart.
+  const pullers = riders.length ? list.map((x, i) => i).filter(i => !['dead', 'fainting'].includes(list[i].mood)).slice(-2) : [];
+  const cartHtml = riders.length ? `<div class="cart ${pullers.length ? '' : 'parked'}" style="left:${cartX}%;width:${cartW}px;--rw:${riderW}px">
+      <div class="riders">${riders.map(x => `<div class="rider">${petSVG(x.pet, x.mood, x.stage, 'c' + x.key.slice(0, 8))}</div>`).join('')}</div>
+      <div class="box"></div><div class="handle"></div><span class="hitch"></span>
+      <div class="wheel w1"><i></i></div><div class="wheel w2"><i></i></div>
+    </div>
+    <div class="tag cart-tag" style="left:${cartX}%;bottom:2px">${riders.map(x => `${x.pet.condition === 'sick' ? '🤒' : '🩹'} ${x.me ? '<b>You</b> · ' : ''}${esc(x.pet.name)}`).join(' · ')}</div>
+    ${pullers.length ? '' : `<div class="scene-note cart-note">Waiting for a healthy friend to pull the cart</div>`}` : '';
   const label = x => x.mood === 'dead' ? 'starved' : x.mood === 'fainting' ? 'fainted' : x.mood === 'starving' ? 'starving' : x.mood === 'hungry' ? 'hungry' : x.mood === 'content' ? 'fine' : 'strong';
   const runnerHtml = list.map((x, i) => {
     const lane = LANES[laneIdx[i] % 3];
     const w = Math.round(base * lane.s);
     const spd = (0.75 - Math.max(0, x.strength) / 100 * 0.4).toFixed(2);
-    return `<div class="runner ${x.me ? 'me' : ''} ${x.mood}" style="left:${pos(i)}%;bottom:${lane.b}px;width:${w}px;z-index:${lane.z + 10};--spd:${spd}s">
+    return `<div class="runner ${x.me ? 'me' : ''} ${x.mood}" ${pullers.includes(i) ? 'data-puller="1"' : ''} style="left:${pos(i)}%;bottom:${lane.b}px;width:${w}px;z-index:${lane.z + 10};--spd:${spd}s">
       ${x.mood !== 'dead' && x.mood !== 'fainting' && x.strength >= 70 ? '<div class="dust"><i></i><i></i><i></i></div>' : ''}
       ${petSVG(x.pet, x.mood, x.stage, 'r' + x.key.slice(0, 8), true)}
     </div>`;
@@ -865,17 +941,20 @@ function renderRun() {
     // Above the back row, so a bubble never covers a pet running behind.
     const y = LANES[1].b + Math.round(base * LANES[1].s * 0.82);
     return `<div class="bubble ${x.me ? 'me' : ''}" style="left:${pos(i)}%;bottom:${y}px" title="${esc(fmtAgo(Date.parse(m.created_at), Date.now()))}"><span>${esc(m.body)}</span></div>`;
+  }).join('') + riders.map(x => {
+    const m = messages[idOf(x)]; if (!m) return '';
+    return `<div class="bubble ${x.me ? 'me' : ''}" style="left:${cartX}%;bottom:${LANES[1].b + Math.round(base * LANES[1].s * 0.82)}px"><span>${esc(m.body)}</span></div>`;
   }).join('');
   // Name tags live on their own layer so no pet ever covers them.
   const tagHtml = list.map((x, i) => `<div class="tag ${x.me ? 'me' : ''}" style="left:${pos(i)}%;bottom:${LANES[laneIdx[i] % 3].b - 14}px">${x.me ? '<b>You</b> · ' : ''}${esc(x.pet.name)}</div>`).join('');
-  const nameById = Object.fromEntries(ranked.map(x => [idOf(x), x.me ? 'you' : x.pet.name]));
-  const rows = ranked.map((x, i) => {
+  const nameById = Object.fromEntries(everyone.map(x => [idOf(x), x.me ? 'you' : x.pet.name]));
+  const rows = everyone.map((x, i) => {
     const bud = buddiesOf(idOf(x)).filter(id => nameById[id]).map(id => nameById[id]);
     return `
     <li class="${x.me ? 'me' : ''}">
       <span class="rank">${i + 1}</span>
       <span class="who"><b>${esc(x.pet.name)}</b><span class="small muted">${x.me ? 'you' : '@' + esc(x.user)} · LV ${x.level}</span>${bud.length ? `<span class="small bud-note">🤝 with ${bud.map(esc).join(', ')}</span>` : ''}${messages[idOf(x)] ? `<span class="small msg-note">💬 ${esc(messages[idOf(x)].body)} <span class="muted">· ${fmtAgo(Date.parse(messages[idOf(x)].created_at), Date.now())}</span></span>` : ''}</span>
-      <span class="str"><span class="sbar"><i style="width:${Math.max(0, x.strength)}%"></i></span><span class="small ${x.strength < 15 ? 'bad' : 'muted'}">${label(x)}</span></span>
+      <span class="str"><span class="sbar"><i style="width:${Math.max(0, x.strength)}%"></i></span><span class="small ${isRider(x) ? 'cond-note' : x.strength < 15 ? 'bad' : 'muted'}">${isRider(x) ? (x.pet.condition === 'sick' ? '🤒 sick' : '🩹 injured') : label(x)}</span></span>
     </li>`;
   }).join('');
   $('#app').innerHTML = `${header()}
@@ -883,18 +962,20 @@ function renderRun() {
       ${sky.orb}
       ${sceneLayers(sky.night)}
       <button class="scene-title" id="renamePack2" aria-label="Rename your running group">${esc(packName())} <span>✏️</span></button>
-      ${n ? runnerHtml + linkHtml + tagHtml + bubbleHtml : ''}
-      ${n <= 1 ? `<div class="scene-note">${!friends.loaded && !friends.error ? 'Loading friends…' : 'Add friends to run together!'}</div>` : ''}
+      ${N ? runnerHtml + linkHtml + tagHtml + cartHtml + bubbleHtml : ''}
+      <svg class="ropes" aria-hidden="true"></svg>
+      ${N <= 1 ? `<div class="scene-note">${!friends.loaded && !friends.error ? 'Loading friends…' : 'Add friends to run together!'}</div>` : ''}
     </div>
-    ${n ? `<form class="say" id="sayForm"><input id="say" class="text" maxlength="80" autocomplete="off" placeholder="Say something to your pack…"><button class="btn primary" id="saySend">Send</button></form>
+    ${N ? `<form class="say" id="sayForm"><input id="say" class="text" maxlength="80" autocomplete="off" placeholder="Say something to your pack…"><button class="btn primary" id="saySend">Send</button></form>
       ${messages[profile.id] ? `<div class="small muted say-mine">Your bubble: “${esc(messages[profile.id].body)}” · ${fmtAgo(Date.parse(messages[profile.id].created_at), Date.now())} · <button class="linkbtn" id="sayClear">Remove</button></div>` : ''}` : ''}
     <p class="small muted center" style="margin:8px 0 14px">Strongest pets lead the pack, the weakest trail behind. Friends who ran together this week run side by side 🤝</p>
-    ${n ? `<section class="card"><h2><span class="packname">${esc(packName())} <button class="linkbtn rename" id="renamePack" aria-label="Rename your running group">✏️</button></span><button class="btn small ghost" id="rrefresh">${friends.loading ? 'Loading…' : 'Refresh'}</button></h2><ol class="pack">${rows}</ol>
-      ${n === 1 ? `<div class="empty">Only you so far. <button class="linkbtn" id="goFriends">Add friends</button></div>` : ''}</section>` : ''}`;
+    ${N ? `<section class="card"><h2><span class="packname">${esc(packName())} <button class="linkbtn rename" id="renamePack" aria-label="Rename your running group">✏️</button></span><button class="btn small ghost" id="rrefresh">${friends.loading ? 'Loading…' : 'Refresh'}</button></h2><ol class="pack">${rows}</ol>
+      ${N === 1 ? `<div class="empty">Only you so far. <button class="linkbtn" id="goFriends">Add friends</button></div>` : ''}</section>` : ''}`;
   bindHeader();
   if ($('#rrefresh')) $('#rrefresh').onclick = loadFriends;
   ['#renamePack', '#renamePack2'].forEach(sel => { if ($(sel)) $(sel).onclick = openRenamePack; });
   stackBubbles();
+  drawRopes();
   if ($('#sayForm')) $('#sayForm').onsubmit = e => { e.preventDefault(); sendMessage($('#say').value); };
   if ($('#sayClear')) $('#sayClear').onclick = clearMessage;
   if ($('#goFriends')) $('#goFriends').onclick = () => { tab = 'friends'; render(); };
@@ -1415,6 +1496,24 @@ function bindDebug() {
 }
 
 
+/* ============ cart ropes ============ */
+// Ropes from the cart's handle to the pets pulling it (drawn after layout).
+function drawRopes() {
+  const scene = document.querySelector('.scene'), svg = scene && scene.querySelector('.ropes'), hitch = scene && scene.querySelector('.cart .hitch');
+  if (!svg) return;
+  svg.innerHTML = '';
+  if (!hitch) return;
+  const sr = scene.getBoundingClientRect(), h = hitch.getBoundingClientRect();
+  const x0 = h.left + h.width / 2 - sr.left, y0 = h.top + h.height / 2 - sr.top;
+  svg.setAttribute('viewBox', `0 0 ${sr.width} ${sr.height}`);
+  svg.innerHTML = [...scene.querySelectorAll('.runner[data-puller]')].map(el => {
+    // offset* ignores the running bounce, so the rope doesn't jump around
+    const x1 = el.offsetLeft - el.offsetWidth * 0.32, y1 = el.offsetTop + el.offsetHeight * 0.72;
+    const mx = (x0 + x1) / 2, my = Math.max(y0, y1) + 10;
+    return `<path d="M${x0} ${y0} Q${mx} ${my} ${x1} ${y1}" fill="none" stroke="#8a5a3c" stroke-width="3" stroke-linecap="round"/><path d="M${x0} ${y0} Q${mx} ${my} ${x1} ${y1}" fill="none" stroke="#c8935f" stroke-width="1.2" stroke-dasharray="3 4" stroke-linecap="round"/>`;
+  }).join('');
+}
+
 /* ============ chat bubbles ============ */
 // Bubbles that would overlap get stacked upwards, left to right.
 function stackBubbles() {
@@ -1464,6 +1563,21 @@ async function clearMessage() {
   const { error } = await sb.from('pack_messages').delete().eq('user_id', profile.id);
   if (error) return toast("Couldn't remove it. Try again.");
   const m = { ...messages }; delete m[profile.id]; messages = m; render();
+}
+
+/* ============ sick / injured ============ */
+async function setCondition(c) {
+  const p = S.pet, t = now();
+  if ((p.condition || null) === c) return;
+  // Close the current rest period (if any) and start a new one.
+  if (p.condition && p.conditionSince) p.restPeriods = [...(p.restPeriods || []), [p.conditionSince, t]];
+  p.condition = c; p.conditionSince = c ? t : null;
+  render();
+  const ok = await persistPet();
+  if (ok === false) return;
+  toast(c === 'sick' ? `Get well soon! ${esc(p.name)} rests with you, and hunger is paused.`
+    : c === 'injured' ? `Heal up! ${esc(p.name)} rests with you, and hunger is paused.`
+    : `Welcome back! ${esc(p.name)} is hungry again from now on.`);
 }
 
 /* ============ add run ============ */
