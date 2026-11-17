@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runagotchi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5efe3; --card:#fffaf1; --ink:#22201b; --muted:#77705f; --line:#e6dccb;
+  --accent:#ff6b35; --accent-ink:#fff; --good:#2f9e6b; --warn:#e3a008; --bad:#d64545;
+  --lcd:#cfdcb8; --lcd-ink:#3d4a2c; --shell:#ff8f6b;
+  --r:18px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Fredoka,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+input,select{font:inherit;color:inherit}
+.mono{font-family:"DM Mono",ui-monospace,monospace}
+.wrap{max-width:480px;margin:0 auto;padding:18px 16px 60px}
+header.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.brand{font-weight:700;font-size:22px;letter-spacing:-.3px}
+.brand span{color:var(--accent)}
+.save-status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.cloud{background:var(--good)}
+
+/* device */
+.device{position:relative;margin:4px auto 0;width:100%;max-width:360px;aspect-ratio:1/1.08;
+  background:radial-gradient(120% 90% at 30% 20%, #ffb898 0%, var(--shell) 45%, #f0704a 100%);
+  border-radius:50% 50% 46% 46% / 56% 56% 44% 44%;box-shadow:inset -10px -16px 0 rgba(0,0,0,.08), inset 8px 10px 0 rgba(255,255,255,.25), 0 14px 30px rgba(120,60,20,.18);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14% 13% 12%}
+.screen{width:100%;aspect-ratio:1/1;border-radius:22px;background:var(--lcd);position:relative;overflow:hidden;
+  box-shadow:inset 0 0 0 4px rgba(0,0,0,.12), inset 0 6px 14px rgba(0,0,0,.12);
+  background-image:repeating-linear-gradient(0deg, rgba(0,0,0,.035) 0 1px, transparent 1px 4px),repeating-linear-gradient(90deg, rgba(0,0,0,.035) 0 1px, transparent 1px 4px)}
+.screen svg{position:absolute;inset:6% 6% 4%;width:88%;height:90%}
+.screen .lv{position:absolute;top:10px;left:12px;font-size:12px;color:var(--lcd-ink);font-family:"DM Mono",monospace}
+.screen .clock{position:absolute;top:10px;right:12px;font-size:12px;color:var(--lcd-ink);font-family:"DM Mono",monospace}
+.screen.dead{filter:grayscale(.7)}
+.float-txt{position:absolute;left:50%;top:40%;transform:translateX(-50%);font-weight:700;color:var(--lcd-ink);font-size:22px;animation:floatUp 1.6s ease-out forwards;pointer-events:none}
+@keyframes floatUp{0%{opacity:0;transform:translate(-50%,10px)}15%{opacity:1}100%{opacity:0;transform:translate(-50%,-60px)}}
+.hunger{display:flex;gap:4px;margin-top:12px;width:100%}
+.hunger i{flex:1;height:12px;border-radius:4px;background:rgba(0,0,0,.14)}
+.hunger i.on{background:#fff}
+.hunger.low i.on{background:#ffe08a}
+.hunger.crit i.on{background:#ffd0d0}
+
+.petname{text-align:center;margin:16px 0 2px;font-size:26px;font-weight:700;letter-spacing:-.4px}
+.status{text-align:center;color:var(--muted);font-size:15px;min-height:22px;padding:0 10px}
+.status b{color:var(--ink);font-weight:600}
+.status.bad b{color:var(--bad)}
+
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.stat .v{font-family:"DM Mono",monospace;font-size:20px;font-weight:500}
+.stat .k{font-size:12px;color:var(--muted)}
+
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:22px}
+.btn{border:0;border-radius:14px;padding:14px 16px;font-weight:600;font-size:16px;background:var(--card);border:1px solid var(--line)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;box-shadow:0 4px 0 #d9542a}
+.btn.primary:active{transform:translateY(2px);box-shadow:0 2px 0 #d9542a}
+.btn.dark{background:var(--ink);color:#fff;border-color:transparent}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--bad)}
+.btn.small{padding:8px 12px;font-size:14px;border-radius:10px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+section.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
+section.card h2{font-size:17px;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.runs{list-style:none;margin:0;padding:0}
+.runs li{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.runs li:first-child{border-top:0}
+.runs .km{font-family:"DM Mono",monospace;font-size:17px;min-width:76px}
+.runs .meta{flex:1;font-size:13px;color:var(--muted);line-height:1.35}
+.badge{display:inline-block;font-size:11px;padding:2px 7px;border-radius:999px;background:#eee4d3;color:#6b5f48;margin-left:4px}
+.badge.coros{background:#e3ecff;color:#2d4f9e}
+.badge.pre{background:#f3e3e3;color:#9e3d3d}
+.x{border:0;background:transparent;font-size:20px;color:var(--muted);padding:4px 8px;border-radius:8px}
+.x:hover{background:#efe6d6}
+.empty{color:var(--muted);font-size:14px;padding:6px 0}
+
+.coros-logo{font-weight:700;letter-spacing:1px;font-size:13px;background:#111;color:#fff;padding:3px 8px;border-radius:6px}
+ol.steps{padding-left:20px;margin:8px 0 12px;font-size:14px;line-height:1.5}
+.drop{border:2px dashed var(--line);border-radius:14px;padding:18px;text-align:center;color:var(--muted);font-size:14px;transition:.15s}
+.drop.over{border-color:var(--accent);background:#fff1ea;color:var(--ink)}
+.drop label{color:var(--accent);font-weight:600;cursor:pointer}
+.note{font-size:13px;background:#f3ecdf;border-radius:12px;padding:10px 12px;margin-top:12px;color:#5d5546;line-height:1.45}
+
+details.settings summary{cursor:pointer;font-weight:600;list-style:none}
+details.settings summary::-webkit-details-marker{display:none}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+
+/* creator */
+.creator .preview{width:200px;height:200px;margin:0 auto;border-radius:24px;background:var(--lcd);position:relative;
+  background-image:repeating-linear-gradient(0deg, rgba(0,0,0,.035) 0 1px, transparent 1px 4px),repeating-linear-gradient(90deg, rgba(0,0,0,.035) 0 1px, transparent 1px 4px)}
+.creator .preview svg{width:100%;height:100%}
+.field{margin-top:18px}
+.field > label, .field > .lbl{display:block;font-weight:600;margin-bottom:8px;font-size:15px}
+.text{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:#fff;font-size:17px}
+.text:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:2px solid var(--line);background:#fff;border-radius:14px;padding:6px 10px;display:flex;align-items:center;gap:6px;font-size:14px}
+.chip svg{width:40px;height:40px}
+.chip.sel{border-color:var(--ink)}
+.sw{width:40px;height:40px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 2px var(--line)}
+.sw.sel{box-shadow:0 0 0 3px var(--ink)}
+.diff{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.diff .chip{flex-direction:column;align-items:flex-start;gap:2px;padding:10px}
+.diff .chip b{font-size:15px}
+.diff .chip span{font-size:12px;color:var(--muted)}
+.hero{text-align:center;margin:6px 0 16px}
+.hero h1{font-size:28px;margin:0 0 4px;letter-spacing:-.5px}
+.hero p{margin:0;color:var(--muted)}
+
+/* sheet */
+.backdrop{position:fixed;inset:0;background:rgba(30,25,15,.4);display:none;align-items:flex-end;justify-content:center;z-index:20}
+.backdrop.open{display:flex}
+.sheet{background:var(--card);width:100%;max-width:480px;border-radius:22px 22px 0 0;padding:20px 18px 28px;max-height:90vh;overflow:auto;animation:up .2s ease-out}
+@keyframes up{from{transform:translateY(30px);opacity:.4}}
+.sheet h3{margin:0 0 12px;font-size:20px}
+.sheet .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.err{color:var(--bad);font-size:13px;min-height:18px;margin-top:6px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 16px;border-radius:14px;font-size:14px;max-width:92vw;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.2);display:none;line-height:1.4}
+.toast.show{display:block;animation:up .2s}
+
+/* pet animation */
+.pet-anim{transform-box:fill-box;transform-origin:50% 100%}
+.m-happy{animation:bounce 1.1s ease-in-out infinite}
+.m-content{animation:breathe 3.2s ease-in-out infinite}
+.m-hungry{animation:sway 2.4s ease-in-out infinite}
+.m-starving{animation:shiver .25s linear infinite}
+.m-fainting{transform:rotate(-78deg) translate(10px,6px);transform-origin:50% 100%}
+.m-dead{animation:ghost 3s ease-in-out infinite;opacity:.55}
+@keyframes bounce{0%,100%{transform:translateY(0) scale(1,1)}40%{transform:translateY(-14px) scale(.97,1.03)}55%{transform:translateY(0) scale(1.05,.95)}}
+@keyframes breathe{0%,100%{transform:scale(1,1)}50%{transform:scale(1.02,.98)}}
+@keyframes sway{0%,100%{transform:rotate(-3deg)}50%{transform:rotate(3deg)}}
+@keyframes shiver{0%,100%{transform:translateX(0)}25%{transform:translateX(-1.5px)}75%{transform:translateX(1.5px)}}
+@keyframes ghost{0%,100%{transform:translateY(-6px)}50%{transform:translateY(-16px)}}
+@media (prefers-reduced-motion:reduce){.m-happy,.m-content,.m-hungry,.m-starving,.m-dead{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<div class="backdrop" id="backdrop"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ config ============ */
+const FOOD_PER_KM = 10, MAX_FOOD = 100, START_FOOD = 70, GRACE_H = 72, REVIVE_KM = 5;
+const DIFF = {
+  easy:   { label: 'Chill',  km: 10 },
+  normal: { label: 'Steady', km: 20 },
+  hard:   { label: 'Beast',  km: 35 }
+};
+const COLORS = { tangerine:'#ff8a4c', mint:'#5fd3a5', sky:'#6fb6ff', lilac:'#b48cff', lemon:'#ffd84d', bubblegum:'#ff7eb6' };
+const SHAPES = {
+  blob:   { label:'Blob',   d:'M100 66c40 0 64 30 64 62s-26 46-64 46-64-14-64-46 24-62 64-62z', top:66, face:118, ex:22 },
+  bean:   { label:'Bean',   d:'M100 52c30 0 48 22 48 52v40c0 22-20 32-48 32s-48-10-48-32v-40c0-30 18-52 48-52z', top:52, face:104, ex:20 },
+  pebble: { label:'Pebble', d:'M100 88c46 0 76 22 76 46s-30 40-76 40-76-16-76-40 30-46 76-46z', top:88, face:128, ex:26 },
+  drop:   { label:'Drop',   d:'M100 50c18 26 60 58 60 88 0 26-26 38-60 38s-60-12-60-38c0-30 42-62 60-88z', top:56, face:132, ex:20 }
+};
+const PATTERNS = { none:'Plain', spots:'Spots', belly:'Belly' };
+const ACCS = { none:'None', headband:'Headband', cap:'Cap', sprout:'Sprout', bow:'Bow' };
+
+/* ============ state ============ */
+let S = null;               // { v, pet, runs, updatedAt }
+let devOffset = 0;          // time machine (testing only, not saved)
+let draft = null;           // pet being created / edited
+let showAllRuns = false;
+const now = () => Date.now() + devOffset;
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $ = s => document.querySelector(s);
+const H = 3.6e6, D = 24 * H;
+
+/* ============ hunger simulation ============ */
+// Replays the pet's whole life from birth: food drains steadily, runs add food.
+// At 0 food the pet faints; after GRACE_H hours fainted it starves.
+// A run of REVIVE_KM+ km brings a starved pet back.
+function simulate(st, tNow) {
+  const p = st.pet;
+  const decayH = DIFF[p.difficulty].km * FOOD_PER_KM / 7 / 24; // food per hour
+  let t = p.createdAt, f = START_FOOD, dead = false, zeroAt = null, deathAt = null;
+  let fedKm = 0, lastFeed = null, revives = 0;
+  const adv = to => {
+    if (to <= t) return;
+    if (!dead) {
+      const h = (to - t) / H;
+      if (f > 0) {
+        const hz = f / decayH;
+        if (h < hz) f -= decayH * h;
+        else { zeroAt = t + hz * H; f = 0; }
+      }
+      if (f === 0 && zeroAt !== null && to - zeroAt >= GRACE_H * H) { dead = true; deathAt = zeroAt + GRACE_H * H; }
+    }
+    t = to;
+  };
+  const runs = st.runs.filter(r => r.date >= p.createdAt && r.date <= tNow).sort((a, b) => a.date - b.date);
+  for (const r of runs) {
+    adv(r.date);
+    if (dead) {
+      if (r.km >= REVIVE_KM) { dead = false; deathAt = null; zeroAt = null; f = Math.min(MAX_FOOD, r.km * FOOD_PER_KM); revives++; fedKm += r.km; lastFeed = r.date; }
+    } else {
+      f = Math.min(MAX_FOOD, f + r.km * FOOD_PER_KM);
+      if (f > 0) zeroAt = null;
+      fedKm += r.km; lastFeed = r.date;
+    }
+  }
+  adv(tNow);
+  return { f, dead, zeroAt, deathAt, fedKm, lastFeed, decayH, revives };
+}
+function moodOf(sim) {
+  if (sim.dead) return 'dead';
+  if (sim.f <= 0) return 'fainting';
+  if (sim.f < 15) return 'starving';
+  if (sim.f < 40) return 'hungry';
+  if (sim.f < 70) return 'content';
+  return 'happy';
+}
+const stageOf = km => km < 25 ? 'baby' : km < 100 ? 'kid' : 'grown';
+const levelOf = km => Math.floor(Math.sqrt(km / 2)) + 1;
+
+/* ============ pet drawing ============ */
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  const m = v => Math.max(0, Math.min(255, Math.round(amt < 0 ? v * (1 + amt) : v + (255 - v) * amt)));
+  return '#' + [m(r), m(g), m(b)].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+function petSVG(p, mood, stage, id) {
+  const sh = SHAPES[p.shape] || SHAPES.blob;
+  const dead = mood === 'dead';
+  const col = dead ? '#d6d6d0' : (COLORS[p.color] || COLORS.tangerine);
+  const dark = shade(col, -0.35), ink = '#2b2a22';
+  const scale = { baby: .72, kid: .86, grown: 1 }[stage] || 1;
+  const ey = sh.face, ex = sh.ex, L = 100 - ex, R = 100 + ex;
+  const clip = 'bc' + id;
+  let pattern = '';
+  if (p.pattern === 'spots') pattern = `<g fill="${shade(col, .35)}"><circle cx="66" cy="${sh.top + 30}" r="9"/><circle cx="138" cy="${sh.top + 46}" r="12"/><circle cx="62" cy="${ey + 34}" r="7"/><circle cx="146" cy="${ey + 30}" r="6"/></g>`;
+  if (p.pattern === 'belly') pattern = `<ellipse cx="100" cy="${ey + 46}" rx="40" ry="30" fill="${shade(col, .5)}"/>`;
+  let band = p.acc === 'headband' ? `<rect x="0" y="${sh.top + 12}" width="200" height="12" fill="#e8403a"/><rect x="0" y="${sh.top + 16}" width="200" height="3" fill="#fff" opacity=".7"/>` : '';
+  let eyes = '', mouth = '', extra = '';
+  const eyeDot = x => `<circle cx="${x}" cy="${ey}" r="6.5" fill="${ink}"/><circle cx="${x + 2}" cy="${ey - 2.5}" r="2.2" fill="#fff"/>`;
+  switch (mood) {
+    case 'happy':
+      eyes = [L, R].map(x => `<path d="M${x - 8} ${ey + 3}q8 -12 16 0" fill="none" stroke="${ink}" stroke-width="4" stroke-linecap="round"/>`).join('');
+      mouth = `<path d="M87 ${ey + 13}q13 16 26 0z" fill="${ink}"/><path d="M93 ${ey + 18}q7 5 14 0" fill="#ff7a8a"/>`;
+      extra = `<ellipse cx="${L - 10}" cy="${ey + 13}" rx="8" ry="5" fill="#ff7a8a" opacity=".55"/><ellipse cx="${R + 10}" cy="${ey + 13}" rx="8" ry="5" fill="#ff7a8a" opacity=".55"/>`;
+      break;
+    case 'content':
+      eyes = eyeDot(L) + eyeDot(R);
+      mouth = `<path d="M92 ${ey + 15}q8 8 16 0" fill="none" stroke="${ink}" stroke-width="3.5" stroke-linecap="round"/>`;
+      extra = `<ellipse cx="${L - 10}" cy="${ey + 13}" rx="7" ry="4" fill="#ff7a8a" opacity=".35"/><ellipse cx="${R + 10}" cy="${ey + 13}" rx="7" ry="4" fill="#ff7a8a" opacity=".35"/>`;
+      break;
+    case 'hungry':
+      eyes = eyeDot(L) + eyeDot(R) + `<path d="M${L - 9} ${ey - 14}l14 5M${R + 9} ${ey - 14}l-14 5" stroke="${ink}" stroke-width="3.5" stroke-linecap="round"/>`;
+      mouth = `<ellipse cx="100" cy="${ey + 18}" rx="5" ry="6.5" fill="${ink}"/>`;
+      break;
+    case 'starving':
+      eyes = [L, R].map(x => `<path d="M${x - 8} ${ey}h16" stroke="${ink}" stroke-width="4" stroke-linecap="round"/><path d="M${x - 6} ${ey + 1}q6 7 12 0" fill="${ink}"/>`).join('');
+      mouth = `<path d="M86 ${ey + 20}q3.5 -5 7 0t7 0t7 0t7 0" fill="none" stroke="${ink}" stroke-width="3" stroke-linecap="round"/>`;
+      extra = `<path d="M${R + 24} ${ey - 20}q-6 10 0 13q6 -3 0 -13z" fill="#6fb6ff"/>`;
+      break;
+    case 'fainting':
+      eyes = [L, R].map(x => `<circle cx="${x}" cy="${ey}" r="7" fill="none" stroke="${ink}" stroke-width="2.5"/><circle cx="${x}" cy="${ey}" r="2.5" fill="none" stroke="${ink}" stroke-width="2.5"/>`).join('');
+      mouth = `<ellipse cx="100" cy="${ey + 18}" rx="8" ry="3" fill="${ink}"/>`;
+      break;
+    case 'dead':
+      eyes = [L, R].map(x => `<path d="M${x - 6} ${ey - 6}l12 12M${x + 6} ${ey - 6}l-12 12" stroke="${ink}" stroke-width="3.5" stroke-linecap="round"/>`).join('');
+      mouth = `<path d="M92 ${ey + 18}h16" stroke="${ink}" stroke-width="3" stroke-linecap="round"/>`;
+      extra = `<ellipse cx="100" cy="${sh.top - 14}" rx="26" ry="7" fill="none" stroke="#c9a227" stroke-width="4"/>`;
+      break;
+  }
+  let acc = '';
+  if (p.acc === 'cap') acc = `<path d="M${100 - 34} ${sh.top + 10}q34 -34 68 0z" fill="#2d4f9e"/><path d="M${100 + 30} ${sh.top + 8}q26 2 30 10q-16 2 -32 -2z" fill="#1f3a78"/><circle cx="100" cy="${sh.top - 7}" r="4" fill="#fff"/>`;
+  if (p.acc === 'sprout') acc = `<path d="M100 ${sh.top + 2}v-18" stroke="#3f8f4f" stroke-width="4" stroke-linecap="round"/><path d="M100 ${sh.top - 14}q-18 -12 -24 2q14 8 24 -2z" fill="#5fbf6f"/><path d="M100 ${sh.top - 16}q16 -14 24 -2q-12 10 -24 2z" fill="#4caf5f"/>`;
+  if (p.acc === 'bow') acc = `<g transform="translate(${100 + 26} ${sh.top + 10}) rotate(18)"><path d="M0 0l-16 -10v20z" fill="#ff4f8b"/><path d="M0 0l16 -10v20z" fill="#ff4f8b"/><circle r="5" fill="#e0306f"/></g>`;
+  const feet = dead ? '' : `<ellipse cx="78" cy="175" rx="14" ry="7" fill="${dark}"/><ellipse cx="122" cy="175" rx="14" ry="7" fill="${dark}"/>`;
+  return `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs><clipPath id="${clip}"><path d="${sh.d}"/></clipPath></defs>
+    ${dead ? '' : '<ellipse cx="100" cy="182" rx="56" ry="6" fill="rgba(0,0,0,.13)"/>'}
+    <g transform="translate(100 180) scale(${scale}) translate(-100 -180)">
+      <g class="pet-anim m-${mood}">
+        ${feet}
+        <path d="${sh.d}" fill="${col}"/>
+        <g clip-path="url(#${clip})">${pattern}${band}<path d="${sh.d}" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="10" transform="translate(-4 -6)"/></g>
+        <path d="${sh.d}" fill="none" stroke="${dark}" stroke-width="3"/>
+        ${extra}${eyes}${mouth}${acc}
+      </g>
+    </g>
+  </svg>`;
+}
+
+/* ============ file parsers (COROS exports) ============ */
+const FIT_EPOCH = 631065600; // 1989-12-31T00:00:00Z in unix seconds
+function parseFIT(buf) {
+  const dv = new DataView(buf);
+  const hs = dv.getUint8(0);
+  const dataSize = dv.getUint32(4, true);
+  const sig = String.fromCharCode(dv.getUint8(8), dv.getUint8(9), dv.getUint8(10), dv.getUint8(11));
+  if (sig !== '.FIT') throw new Error('Not a FIT file');
+  const end = Math.min(hs + dataSize, buf.byteLength);
+  let pos = hs;
+  const defs = {}, sessions = [], records = [];
+  let sport = null;
+  const rd = (size, little) => {
+    let v;
+    if (size === 1) v = dv.getUint8(pos);
+    else if (size === 2) v = dv.getUint16(pos, little);
+    else if (size === 4) v = dv.getUint32(pos, little);
+    else v = null;
+    pos += size;
+    return v;
+  };
+  while (pos < end) {
+    const hdr = dv.getUint8(pos++);
+    let local, isDef = false;
+    if (hdr & 0x80) local = (hdr >> 5) & 3;
+    else { local = hdr & 0x0f; isDef = !!(hdr & 0x40); }
+    if (isDef) {
+      const hasDev = !!(hdr & 0x20);
+      pos++; // reserved
+      const little = dv.getUint8(pos++) === 0;
+      const gmn = little ? dv.getUint16(pos, true) : dv.getUint16(pos, false); pos += 2;
+      const nf = dv.getUint8(pos++);
+      const fields = [];
+      for (let i = 0; i < nf; i++) { fields.push({ num: dv.getUint8(pos), size: dv.getUint8(pos + 1) }); pos += 3; }
+      let devSize = 0;
+      if (hasDev) { const nd = dv.getUint8(pos++); for (let i = 0; i < nd; i++) { devSize += dv.getUint8(pos + 1); pos += 3; } }
+      defs[local] = { gmn, little, fields, devSize };
+    } else {
+      const d = defs[local];
+      if (!d) throw new Error('Corrupt FIT file');
+      const vals = {};
+      for (const f of d.fields) vals[f.num] = rd(f.size, d.little);
+      pos += d.devSize;
+      if (d.gmn === 18) sessions.push(vals);            // session
+      else if (d.gmn === 12 && vals[0] != null) sport = vals[0]; // sport
+      else if (d.gmn === 20) records.push(vals);        // record
+    }
+  }
+  const ok = (v, bad) => v != null && v !== bad;
+  const out = [];
+  for (const s of sessions) {
+    if (!ok(s[9], 0xFFFFFFFF)) continue;
+    const sp = ok(s[5], 0xFF) ? s[5] : sport;
+    out.push({
+      date: ok(s[2], 0xFFFFFFFF) ? (s[2] + FIT_EPOCH) * 1000 : (ok(s[253], 0xFFFFFFFF) ? (s[253] + FIT_EPOCH) * 1000 : null),
+      km: s[9] / 100 / 1000,
+      durMin: ok(s[8], 0xFFFFFFFF) ? s[8] / 1000 / 60 : (ok(s[7], 0xFFFFFFFF) ? s[7] / 1000 / 60 : null),
+      isRun: sp == null || sp === 1
+    });
+  }
+  if (!out.length && records.length) { // fallback: last record distance
+    const withDist = records.filter(r => ok(r[5], 0xFFFFFFFF) && ok(r[253], 0xFFFFFFFF));
+    if (withDist.length) {
+      const a = withDist[0], b = withDist[withDist.length - 1];
+      out.push({ date: (a[253] + FIT_EPOCH) * 1000, km: b[5] / 100 / 1000, durMin: (b[253] - a[253]) / 60, isRun: sport == null || sport === 1 });
+    }
+  }
+  return out.filter(a => a.date);
+}
+const kids = (el, name) => Array.from(el.children).filter(c => c.localName === name);
+const all = (el, name) => Array.from(el.getElementsByTagNameNS('*', name));
+function parseTCX(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('Bad TCX');
+  return all(doc, 'Activity').map(a => {
+    const sport = a.getAttribute('Sport') || '';
+    const idEl = kids(a, 'Id')[0];
+    let m = 0, sec = 0;
+    for (const lap of kids(a, 'Lap')) {
+      const dm = kids(lap, 'DistanceMeters')[0], ts = kids(lap, 'TotalTimeSeconds')[0];
+      if (dm) m += parseFloat(dm.textContent) || 0;
+      if (ts) sec += parseFloat(ts.textContent) || 0;
+    }
+    const startAttr = kids(a, 'Lap')[0] && kids(a, 'Lap')[0].getAttribute('StartTime');
+    return { date: Date.parse(idEl ? idEl.textContent.trim() : startAttr), km: m / 1000, durMin: sec ? sec / 60 : null, isRun: !sport || /run/i.test(sport) };
+  }).filter(a => !isNaN(a.date));
+}
+function hav(a, b) {
+  const R = 6371.0088, rad = x => x * Math.PI / 180;
+  const dLat = rad(b[0] - a[0]), dLon = rad(b[1] - a[1]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function parseGPX(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('Bad GPX');
+  return all(doc, 'trk').map(trk => {
+    const type = (kids(trk, 'type')[0] || {}).textContent || '';
+    let km = 0, t0 = null, t1 = null;
+    for (const seg of kids(trk, 'trkseg')) {
+      let prev = null;
+      for (const pt of kids(seg, 'trkpt')) {
+        const p = [parseFloat(pt.getAttribute('lat')), parseFloat(pt.getAttribute('lon'))];
+        if (isNaN(p[0]) || isNaN(p[1])) continue;
+        if (prev) km += hav(prev, p);
+        prev = p;
+        const te = kids(pt, 'time')[0];
+        if (te) { const t = Date.parse(te.textContent); if (!isNaN(t)) { if (t0 == null) t0 = t; t1 = t; } }
+      }
+    }
+    if (t0 == null) { const mt = all(doc, 'time')[0]; if (mt) t0 = Date.parse(mt.textContent); }
+    return { date: t0, km, durMin: t0 != null && t1 != null && t1 > t0 ? (t1 - t0) / 60000 : null, isRun: !type || /run/i.test(type) };
+  }).filter(a => a.date != null && !isNaN(a.date));
+}
+
+/* ============ storage ============ */
+const LS_KEY = 'runagotchi.v1';
+let docRef = null, saveMode = 'local', saving = false, pendingSave = false, cloudTimer = null;
+function cacheLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {} }
+function loadLocal() { try { const t = localStorage.getItem(LS_KEY); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
+function save() {
+  S.updatedAt = Date.now();
+  cacheLocal();
+  if (docRef) { clearTimeout(cloudTimer); cloudTimer = setTimeout(flushCloud, 400); }
+}
+async function flushCloud() {
+  if (!docRef) return;
+  if (saving) { pendingSave = true; return; }
+  saving = true;
+  try { await docRef.set({ state: JSON.parse(JSON.stringify(S)) }); }
+  catch (e) {
+    if (e && e.code === 'unavailable') { pendingSave = true; await new Promise(r => setTimeout(r, 800 + Math.random() * 800)); }
+    else { docRef = null; saveMode = 'local'; renderSaveStatus(); }
+  }
+  saving = false;
+  if (pendingSave) { pendingSave = false; flushCloud(); }
+}
+async function initCloud() {
+  if (typeof window.claude === 'undefined' || !window.claude || typeof window.claude.use !== 'function') return;
+  try {
+    const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
+    if (!db || !user) return;
+    const id = await user.id();
+    if (!id) return;
+    const ref = db.doc('data/users/' + id + '/tamagotchi');
+    const snap = await Promise.race([ref.get(), new Promise((_, rej) => setTimeout(() => rej({ code: 'timeout' }), 10000))]);
+    docRef = ref; saveMode = 'cloud';
+    const cloud = snap.exists ? (snap.data() || {}).state : null;
+    if (cloud && (!S || (cloud.updatedAt || 0) >= (S.updatedAt || 0))) {
+      S = JSON.parse(JSON.stringify(cloud)); cacheLocal(); render();
+    } else if (S) { flushCloud(); }
+    renderSaveStatus();
+  } catch (e) { docRef = null; saveMode = 'local'; renderSaveStatus(); }
+}
+
+/* ============ helpers ============ */
+function fmtHours(h) {
+  if (h < 1) return 'under an hour';
+  if (h < 36) return Math.round(h) + ' h';
+  const d = h / 24;
+  return (d < 10 ? d.toFixed(1).replace(/\.0$/, '') : Math.round(d)) + ' days';
+}
+function fmtAgo(t) {
+  const h = (now() - t) / H;
+  if (h < 1) return 'just now';
+  if (h < 24) return Math.round(h) + ' h ago';
+  const d = Math.round(h / 24);
+  return d === 1 ? 'yesterday' : d + ' days ago';
+}
+const fmtKm = km => (Math.round(km * 100) / 100).toFixed(km < 100 ? 2 : 1);
+function fmtDate(t) {
+  return new Date(t).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+function pace(r) {
+  if (!r.durMin || !r.km) return '';
+  const p = r.durMin / r.km; const m = Math.floor(p), s = Math.round((p - m) * 60);
+  return `${m}:${String(s === 60 ? 59 : s).padStart(2, '0')} /km`;
+}
+function toast(msg, ms = 4200) {
+  const t = $('#toast'); t.innerHTML = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+function openSheet(html, mount) {
+  $('#sheet').innerHTML = html; $('#backdrop').classList.add('open');
+  if (mount) mount($('#sheet'));
+}
+function closeSheet() { $('#backdrop').classList.remove('open'); $('#sheet').innerHTML = ''; }
+$('#backdrop').addEventListener('click', e => { if (e.target.id === 'backdrop') closeSheet(); });
+function confirmSheet(title, body, okLabel, onOk, danger = true) {
+  openSheet(`<h3>${title}</h3><p class="muted">${body}</p>
+    <div class="grid2" style="margin-top:16px"><button class="btn" data-a="no">Cancel</button><button class="btn ${danger ? 'dark' : 'primary'}" data-a="ok">${okLabel}</button></div>`,
+    el => {
+      el.querySelector('[data-a=no]').onclick = closeSheet;
+      el.querySelector('[data-a=ok]').onclick = () => { closeSheet(); onOk(); };
+    });
+}
+function localInputValue(t) {
+  const d = new Date(t); const z = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`;
+}
+
+/* ============ creator ============ */
+function newDraft() { return { name: '', shape: 'blob', color: 'tangerine', pattern: 'none', acc: 'headband', difficulty: 'normal' }; }
+function renderCreator(editing) {
+  const d = draft;
+  const chip = (group, key, label, inner) => `<button class="chip ${d[group] === key ? 'sel' : ''}" data-g="${group}" data-k="${key}">${inner || ''}${label}</button>`;
+  $('#app').innerHTML = `
+    <header class="top"><div class="brand">Run<span>agotchi</span></div>${editing ? '<button class="btn small ghost" id="cancelEdit">Cancel</button>' : ''}</header>
+    <div class="creator">
+      ${editing ? '' : `<div class="hero"><h1>Hatch your pet</h1><p>It lives on the kilometers you run.</p></div>`}
+      <div class="preview" id="preview">${petSVG(d, 'happy', 'grown', 'pv')}</div>
+      <div class="field"><label for="nm">Name</label><input id="nm" class="text" maxlength="16" placeholder="e.g. Sprinty" value="${esc(d.name)}" autocomplete="off"></div>
+      <div class="field"><span class="lbl">Body</span><div class="chips">${Object.entries(SHAPES).map(([k, v]) => chip('shape', k, v.label, petSVG({ ...d, shape: k, acc: 'none' }, 'content', 'grown', 'sh' + k))).join('')}</div></div>
+      <div class="field"><span class="lbl">Color</span><div class="chips">${Object.entries(COLORS).map(([k, v]) => `<button class="sw ${d.color === k ? 'sel' : ''}" style="background:${v}" data-g="color" data-k="${k}" aria-label="${k}"></button>`).join('')}</div></div>
+      <div class="field"><span class="lbl">Pattern</span><div class="chips">${Object.entries(PATTERNS).map(([k, v]) => chip('pattern', k, v)).join('')}</div></div>
+      <div class="field"><span class="lbl">Accessory</span><div class="chips">${Object.entries(ACCS).map(([k, v]) => chip('acc', k, v)).join('')}</div></div>
+      <div class="field"><span class="lbl">Appetite</span><div class="diff">${Object.entries(DIFF).map(([k, v]) => `<button class="chip ${d.difficulty === k ? 'sel' : ''}" data-g="difficulty" data-k="${k}"><b>${v.label}</b><span>~${v.km} km / week</span></button>`).join('')}</div>
+        <p class="small muted" style="margin:8px 2px 0">How much your pet needs to eat. Each km you run = ${FOOD_PER_KM} food. A full pet lasts ${Math.round(MAX_FOOD / (DIFF[d.difficulty].km * FOOD_PER_KM / 7) * 10) / 10} days without a run.</p></div>
+      <div class="err" id="cerr"></div>
+      <button class="btn primary" id="hatch" style="width:100%;margin-top:6px">${editing ? 'Save changes' : 'Hatch'}</button>
+    </div>`;
+  const nm = $('#nm');
+  nm.addEventListener('input', () => { d.name = nm.value; $('#hatch').textContent = editing ? 'Save changes' : (d.name.trim() ? 'Hatch ' + d.name.trim() : 'Hatch'); });
+  if (!editing && d.name.trim()) $('#hatch').textContent = 'Hatch ' + d.name.trim();
+  document.querySelectorAll('[data-g]').forEach(b => b.onclick = () => { d[b.dataset.g] = b.dataset.k; renderCreator(editing); });
+  if ($('#cancelEdit')) $('#cancelEdit').onclick = () => { draft = null; render(); };
+  $('#hatch').onclick = () => {
+    const name = d.name.trim();
+    if (!name) { $('#cerr').textContent = 'Give your pet a name first.'; nm.focus(); return; }
+    if (editing) {
+      Object.assign(S.pet, { name, shape: d.shape, color: d.color, pattern: d.pattern, acc: d.acc, difficulty: d.difficulty });
+    } else {
+      const runs = S ? S.runs : [];
+      S = { v: 1, pet: { name, shape: d.shape, color: d.color, pattern: d.pattern, acc: d.acc, difficulty: d.difficulty, createdAt: now() }, runs };
+    }
+    draft = null; save(); render();
+    if (!editing) toast(`${esc(name)} hatched! Go for a run to feed it.`);
+  };
+}
+
+/* ============ main view ============ */
+function renderSaveStatus() {
+  const el = $('#saveStatus'); if (!el) return;
+  el.innerHTML = saveMode === 'cloud' ? '<span class="dot cloud"></span>Saved to your account' : '<span class="dot"></span>Saved on this device';
+}
+function statusLine(sim, p) {
+  const n = `<b>${esc(p.name)}</b>`;
+  const m = moodOf(sim);
+  const kmToFull = Math.max(0, (MAX_FOOD - sim.f) / FOOD_PER_KM);
+  if (m === 'dead') return { cls: 'bad', html: `${n} starved ${fmtAgo(sim.deathAt)}. A run of ${REVIVE_KM} km or more brings it back.` };
+  if (m === 'fainting') {
+    const left = GRACE_H - (now() - sim.zeroAt) / H;
+    return { cls: 'bad', html: `${n} fainted from hunger. <b>${fmtHours(left)}</b> left to save it with a run.` };
+  }
+  if (m === 'starving') return { cls: 'bad', html: `${n} is starving! Faints in <b>${fmtHours(sim.f / sim.decayH)}</b>. ${fmtKm(kmToFull).replace(/\.00$/, '')} km fills it up.` };
+  if (m === 'hungry') return { cls: '', html: `${n} is getting hungry. Starving in <b>${fmtHours((sim.f - 15) / sim.decayH)}</b>.` };
+  if (m === 'content') return { cls: '', html: `${n} is doing fine. Hungry in <b>${fmtHours((sim.f - 40) / sim.decayH)}</b>.` };
+  return { cls: '', html: `${n} is stuffed and happy. Hungry in <b>${fmtHours((sim.f - 40) / sim.decayH)}</b>.` };
+}
+function render() {
+  if (draft) return renderCreator(!!(S && S.pet));
+  if (!S || !S.pet) { draft = newDraft(); return renderCreator(false); }
+  const p = S.pet, t = now();
+  const sim = simulate(S, t), mood = moodOf(sim), stage = stageOf(sim.fedKm), lvl = levelOf(sim.fedKm);
+  const st = statusLine(sim, p);
+  const segs = Math.ceil(sim.f / 10);
+  const hcls = sim.f < 15 ? 'crit' : sim.f < 40 ? 'low' : '';
+  const weekKm = S.runs.filter(r => r.date > t - 7 * D && r.date <= t).reduce((a, r) => a + r.km, 0);
+  const sorted = [...S.runs].sort((a, b) => b.date - a.date);
+  const shown = showAllRuns ? sorted : sorted.slice(0, 6);
+  const goal = DIFF[p.difficulty].km;
+  const clock = new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+
+  $('#app').innerHTML = `
+    <header class="top"><div class="brand">Run<span>agotchi</span></div><div class="save-status" id="saveStatus"></div></header>
+    <div class="device">
+      <div class="screen ${mood === 'dead' ? 'dead' : ''}" id="screen">
+        <div class="lv">LV ${lvl} · ${stage.toUpperCase()}</div><div class="clock">${devOffset ? '⏩ ' : ''}${clock}</div>
+        ${petSVG(p, mood, stage, 'main')}
+      </div>
+      <div class="hunger ${hcls}" aria-label="Food ${Math.round(sim.f)} of 100">${Array.from({ length: 10 }, (_, i) => `<i class="${i < segs ? 'on' : ''}"></i>`).join('')}</div>
+    </div>
+    <div class="petname">${esc(p.name)}</div>
+    <div class="status ${st.cls}">${st.html}</div>
+
+    <div class="stats">
+      <div class="stat"><div class="v">${Math.round(sim.f)}</div><div class="k">food / 100</div></div>
+      <div class="stat"><div class="v">${weekKm >= 100 ? Math.round(weekKm) : weekKm.toFixed(1)}</div><div class="k">km this week · goal ${goal}</div></div>
+      <div class="stat"><div class="v">${sim.fedKm >= 100 ? Math.round(sim.fedKm) : sim.fedKm.toFixed(1)}</div><div class="k">km fed total</div></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="addRun">+ Log a run</button>
+      <button class="btn dark" id="syncBtn">Sync COROS</button>
+    </div>
+
+    <section class="card">
+      <h2>Runs <span class="small muted">${S.runs.length ? (sim.lastFeed ? 'last fed ' + fmtAgo(sim.lastFeed) : '') : ''}</span></h2>
+      ${shown.length ? `<ul class="runs">${shown.map(r => `
+        <li>
+          <div class="km">${fmtKm(r.km)} km</div>
+          <div class="meta">${fmtDate(r.date)}${r.source === 'coros' ? '<span class="badge coros">COROS</span>' : '<span class="badge">Manual</span>'}${r.date < p.createdAt ? '<span class="badge pre">before hatch</span>' : ''}${r.date > t ? '<span class="badge pre">future</span>' : ''}<br>${[r.durMin ? Math.round(r.durMin) + ' min' : '', pace(r)].filter(Boolean).join(' · ')}</div>
+          <button class="x" data-del="${r.id}" aria-label="Delete run">×</button>
+        </li>`).join('')}</ul>
+        ${sorted.length > 6 ? `<button class="btn small ghost" id="moreRuns" style="margin-top:6px">${showAllRuns ? 'Show fewer' : 'Show all ' + sorted.length + ' runs'}</button>` : ''}`
+      : `<div class="empty">No runs yet. Log one or sync from COROS to feed ${esc(p.name)}.</div>`}
+    </section>
+
+    <section class="card" id="corosCard">
+      <h2><span>Sync from COROS</span><span class="coros-logo">COROS</span></h2>
+      <p class="small muted" style="margin:0">Drop the files your COROS watch records (.fit, .tcx or .gpx). Runs are added, duplicates and non-run activities are skipped.</p>
+      <ol class="steps">
+        <li>Open the <b>COROS app</b> and tap a workout.</li>
+        <li>Tap the <b>share icon → Export</b> and pick <b>.fit</b>.</li>
+        <li>Choose the file here. You can pick several at once.</li>
+      </ol>
+      <div class="drop" id="drop"><label for="file">Choose files</label> or drop them here
+        <input type="file" id="file" accept=".fit,.tcx,.gpx" multiple hidden></div>
+      <div class="note">Automatic sync (runs arriving on their own after your watch syncs) needs COROS API access and a small server. That's the next step. This file import uses the same data in the meantime.</div>
+    </section>
+
+    <section class="card">
+      <details class="settings">
+        <summary>Settings</summary>
+        <div class="row"><button class="btn small" id="editPet">Edit ${esc(p.name)}</button><span class="small muted">Appetite: ${DIFF[p.difficulty].label} (~${goal} km/week)</span></div>
+        <div class="row" style="margin-top:14px"><span class="small"><b>Time machine</b> <span class="muted">(for testing hunger)</span></span></div>
+        <div class="row" style="margin-top:6px">
+          <button class="btn small" data-tm="12">+12 h</button><button class="btn small" data-tm="24">+1 day</button><button class="btn small" data-tm="72">+3 days</button>
+          ${devOffset ? '<button class="btn small" data-tm="0">Back to now</button>' : ''}
+        </div>
+        <div class="row" style="margin-top:14px"><button class="btn small danger" id="restart">Start over with a new pet</button></div>
+        <p class="small muted" style="margin:10px 0 0">Born ${fmtDate(p.createdAt)}${sim.revives ? ' · revived ' + sim.revives + '×' : ''}. Runs from before the hatch date are kept but don't count as food.</p>
+      </details>
+    </section>`;
+  renderSaveStatus();
+
+  $('#addRun').onclick = openAddRun;
+  $('#syncBtn').onclick = () => { $('#corosCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); setTimeout(() => $('#file').click(), 350); };
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    const r = S.runs.find(x => x.id === b.dataset.del); if (!r) return;
+    confirmSheet('Delete this run?', `${fmtKm(r.km)} km on ${fmtDate(r.date)}. ${esc(p.name)} will un-eat it.`, 'Delete', () => {
+      S.runs = S.runs.filter(x => x.id !== r.id); save(); render();
+    });
+  });
+  if ($('#moreRuns')) $('#moreRuns').onclick = () => { showAllRuns = !showAllRuns; render(); };
+  const fi = $('#file');
+  fi.onchange = () => { if (fi.files.length) handleFiles(Array.from(fi.files)); fi.value = ''; };
+  const dz = $('#drop');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); handleFiles(Array.from(e.dataTransfer.files)); });
+  $('#editPet').onclick = () => { draft = { ...S.pet }; render(); window.scrollTo(0, 0); };
+  document.querySelectorAll('[data-tm]').forEach(b => b.onclick = () => {
+    const h = +b.dataset.tm; devOffset = h ? devOffset + h * H : 0; render();
+    const d = document.querySelector('details.settings'); if (d) d.open = true;
+  });
+  $('#restart').onclick = () => confirmSheet('Start over?', `${esc(p.name)} will be gone for good. Your runs stay in the log, but only runs after the new pet hatches will feed it.`, 'Start over', () => {
+    S.pet = null; draft = newDraft(); save(); render(); window.scrollTo(0, 0);
+  });
+}
+function feedFx(km) {
+  const sc = $('#screen'); if (!sc) return;
+  const el = document.createElement('div'); el.className = 'float-txt mono'; el.textContent = `+${Math.round(km * FOOD_PER_KM)} food`;
+  sc.appendChild(el); setTimeout(() => el.remove(), 1700);
+}
+
+/* ============ add run ============ */
+function openAddRun() {
+  openSheet(`<h3>Log a run</h3>
+    <div class="grid2">
+      <div class="field" style="margin-top:0"><label for="rk">Distance (km)</label><input id="rk" class="text mono" inputmode="decimal" placeholder="5.0" autocomplete="off"></div>
+      <div class="field" style="margin-top:0"><label for="rd">Time (min) <span class="muted small">optional</span></label><input id="rd" class="text mono" inputmode="numeric" placeholder="28" autocomplete="off"></div>
+    </div>
+    <div class="field"><label for="rt">When</label><input id="rt" type="datetime-local" class="text" value="${localInputValue(now())}"></div>
+    <div class="err" id="rerr"></div>
+    <div class="grid2" style="margin-top:8px"><button class="btn" id="rc">Cancel</button><button class="btn primary" id="rs">Feed ${esc(S.pet.name)}</button></div>`,
+    el => {
+      const k = el.querySelector('#rk'); setTimeout(() => k.focus(), 50);
+      el.querySelector('#rc').onclick = closeSheet;
+      el.querySelector('#rs').onclick = () => {
+        const km = parseFloat(k.value.replace(',', '.'));
+        const durRaw = el.querySelector('#rd').value.replace(',', '.').trim();
+        const dur = durRaw ? parseFloat(durRaw) : null;
+        const when = new Date(el.querySelector('#rt').value).getTime();
+        const err = el.querySelector('#rerr');
+        if (!(km > 0) || km > 400) { err.textContent = 'Enter a distance between 0 and 400 km.'; return; }
+        if (durRaw && !(dur > 0)) { err.textContent = 'Time should be a number of minutes.'; return; }
+        if (isNaN(when)) { err.textContent = 'Pick a date and time.'; return; }
+        if (when > now() + 60000) { err.textContent = "That's in the future."; return; }
+        S.runs.push({ id: uid(), date: when, km: Math.round(km * 100) / 100, durMin: dur, source: 'manual' });
+        closeSheet(); save(); render();
+        if (when >= S.pet.createdAt) feedFx(km);
+        else toast(`Saved. That run is from before ${esc(S.pet.name)} hatched, so it doesn't count as food.`);
+      };
+      el.querySelectorAll('input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') el.querySelector('#rs').click(); }));
+    });
+}
+
+/* ============ import ============ */
+function isDup(a) { return S.runs.some(r => Math.abs(r.date - a.date) < 2 * 60000 && Math.abs(r.km - a.km) < 0.05); }
+async function handleFiles(files) {
+  if (!S || !S.pet) return;
+  const added = []; let dup = 0, notRun = 0, failed = 0;
+  for (const file of files) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    try {
+      let acts;
+      if (ext === 'fit') acts = parseFIT(await file.arrayBuffer());
+      else if (ext === 'tcx') acts = parseTCX(await file.text());
+      else if (ext === 'gpx') acts = parseGPX(await file.text());
+      else { failed++; continue; }
+      if (!acts.length) { failed++; continue; }
+      for (const a of acts) {
+        if (!a.isRun) { notRun++; continue; }
+        if (!(a.km > 0.01)) { failed++; continue; }
+        a.km = Math.round(a.km * 100) / 100;
+        if (isDup(a)) { dup++; continue; }
+        const r = { id: uid(), date: a.date, km: a.km, durMin: a.durMin ? Math.round(a.durMin * 10) / 10 : null, source: 'coros' };
+        S.runs.push(r); added.push(r);
+      }
+    } catch (e) { failed++; }
+  }
+  if (added.length) save();
+  render();
+  const fed = added.filter(r => r.date >= S.pet.createdAt && r.date <= now());
+  const fedKm = fed.reduce((s, r) => s + r.km, 0);
+  if (fedKm) feedFx(fedKm);
+  const parts = [];
+  if (added.length) parts.push(`<b>Added ${added.length} run${added.length > 1 ? 's' : ''}</b> (${fmtKm(added.reduce((s, r) => s + r.km, 0))} km).`);
+  else parts.push('<b>No new runs added.</b>');
+  if (added.length - fed.length > 0) parts.push(`${added.length - fed.length} from before ${esc(S.pet.name)} hatched (no food).`);
+  if (dup) parts.push(`${dup} already in your log.`);
+  if (notRun) parts.push(notRun === 1 ? `1 activity wasn't a run.` : `${notRun} activities weren't runs.`);
+  if (failed) parts.push(`${failed} file${failed > 1 ? 's' : ''} couldn't be read.`);
+  toast(parts.join(' '), 6000);
+}
+
+/* ============ boot ============ */
+S = loadLocal();
+render();
+setInterval(() => { if (!draft && S && S.pet && !$('#backdrop').classList.contains('open')) { const d = document.querySelector('details.settings'); const open = d && d.open; render(); if (open) document.querySelector('details.settings').open = true; } }, 60000);
+setTimeout(initCloud, 0);
+</script>
+</body>
+</html>
