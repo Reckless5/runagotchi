@@ -18,7 +18,7 @@ const PATTERNS = { none:'Plain', spots:'Spots', belly:'Belly' };
 const ACCS = { none:'None', headband:'Headband', cap:'Cap', sprout:'Sprout', bow:'Bow' };
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 const LS_KEY = 'runagotchi.v1', LS_GUEST = 'runagotchi.guest';
-const SUPABASE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+const SUPABASE_LIB = 'vendor/supabase.js'; // self-hosted, so no visitor data goes to a CDN
 
 /* ============ state ============ */
 let sb = null;              // Supabase client (null = no accounts configured)
@@ -35,6 +35,9 @@ let showAllRuns = false;
 let authMode = 'login';
 let friends = { loaded: false, loading: false, error: false, rows: [], profiles: {}, pets: {} };
 let challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
+let watches = { loaded: false, enabled: {}, links: {}, setup: true };
+const watchReturn = (() => { const q = new URLSearchParams(location.search); return q.get('watch') ? { provider: q.get('watch'), status: q.get('status'), reason: q.get('reason') } : null; })();
+if (watchReturn) history.replaceState(null, '', location.pathname);
 const now = () => Date.now() + devOffset;
 const H = 3.6e6, D = 24 * H;
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() :
@@ -277,8 +280,8 @@ async function boot() {
   render();
   if (SUPABASE_URL && SUPABASE_KEY) {
     try {
-      const { createClient } = await import(SUPABASE_CDN);
-      sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+      await new Promise((ok, fail) => { const el = document.createElement('script'); el.src = SUPABASE_LIB; el.onload = ok; el.onerror = fail; document.head.appendChild(el); });
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     } catch (e) { console.error(e); sb = null; }
   }
   if (!sb) return startLocal();
@@ -296,6 +299,7 @@ async function onSession(uid) {
   closeSheet();
   friends = { loaded: false, loading: false, error: false, rows: [], profiles: {}, pets: {} };
   challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
+  watches = { loaded: false, enabled: {}, links: {}, setup: true };
   profile = null; S = null; devOffset = 0;
   if (!uid) {
     if (isGuest()) return startLocal();
@@ -326,6 +330,8 @@ async function loadAccount() {
   if (S.pet) pushSnapshot();
   loadFriends();
   loadChallenges();
+  loadWatches();
+  if (watchReturn) showWatchReturn();
 }
 // A pet made before logging in moves into the account the first time.
 async function moveLocalToAccount(local) {
@@ -366,7 +372,8 @@ function renderAuth() {
         ${signup ? '' : '<div class="center"><button class="linkbtn" id="forgot">Forgot password?</button></div>'}
       </section>
       <div class="center"><button class="linkbtn" id="guest" style="color:var(--muted)">Continue without an account</button>
-        <div class="small muted">Your pet is saved on this device only, and you can't add friends.</div></div>
+        <div class="small muted">Your pet is saved on this device only, and you can't add friends.</div>
+        <div class="small" style="margin-top:14px"><a href="privacy.html" style="color:var(--muted)">Privacy policy</a></div></div>
     </div>`;
   document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { authMode = b.dataset.m; renderAuth(); });
   $('#guest').onclick = () => { setGuest(true); startLocal(); };
@@ -539,13 +546,14 @@ function renderPet() {
       ${shown.length ? `<ul class="runs">${shown.map(r => `
         <li>
           <div class="km">${fmtKm(r.km)} km</div>
-          <div class="meta">${fmtDate(r.date)}${r.source === 'coros' ? '<span class="badge">Imported</span>' : ''}${r.date < p.createdAt ? '<span class="badge pre">before hatch</span>' : ''}${r.date > t ? '<span class="badge pre">future</span>' : ''}<br>${[r.durMin ? Math.round(r.durMin) + ' min' : '', pace(r)].filter(Boolean).join(' · ')}</div>
+          <div class="meta">${fmtDate(r.date)}${WATCH_NAMES[r.source] ? `<span class="badge watch">${WATCH_NAMES[r.source]}</span>` : ''}${r.date < p.createdAt ? '<span class="badge pre">before hatch</span>' : ''}${r.date > t ? '<span class="badge pre">future</span>' : ''}<br>${[r.durMin ? Math.round(r.durMin) + ' min' : '', pace(r)].filter(Boolean).join(' · ')}</div>
           <button class="x" data-del="${r.id}" aria-label="Delete run">×</button>
         </li>`).join('')}</ul>
         ${sorted.length > 6 ? `<button class="btn small ghost" id="moreRuns" style="margin-top:6px">${showAllRuns ? 'Show fewer' : 'Show all ' + sorted.length + ' runs'}</button>` : ''}`
       : `<div class="empty">No runs yet. Log one to feed ${esc(p.name)}.</div>`}
     </section>
 
+    ${mode === 'cloud' ? watchesCard() : ''}
     <section class="card">
       <details class="settings">
         <summary>Settings</summary>
@@ -558,6 +566,7 @@ function renderPet() {
           ${devOffset ? '<button class="btn small" data-tm="0">Back to now</button>' : ''}
         </div>` : ''}
         <div class="row" style="margin-top:14px"><button class="btn small danger" id="restart">Start over with a new pet</button></div>
+        <div class="row" style="margin-top:14px"><a class="small" href="privacy.html" style="color:var(--muted)">Privacy policy</a>${mode === 'cloud' ? `<span class="small muted">· To delete your account, email <a href="mailto:andeleutgeb@gmail.com" style="color:var(--muted)">andeleutgeb@gmail.com</a></span>` : ''}</div>
         <p class="small muted" style="margin:10px 0 0">Born ${fmtDate(p.createdAt)}${sim.revives ? ' · revived ' + sim.revives + '×' : ''}. Runs from before the hatch date are kept but don't count as food.</p>
       </details>
     </section>`;
@@ -576,6 +585,7 @@ function renderPet() {
     const d = document.querySelector('details.settings'); if (d) d.open = true;
   });
   if ($('#logout')) $('#logout').onclick = () => sb.auth.signOut();
+  bindWatches();
   if ($('#toAuth')) $('#toAuth').onclick = () => { setGuest(false); authMode = 'signup'; screen = 'auth'; render(); window.scrollTo(0, 0); };
   $('#restart').onclick = () => confirmSheet('Start over?', `${esc(p.name)} will be gone for good. Your runs stay in the log, but only runs after the new pet hatches will feed it.`, 'Start over', async () => {
     S.pet = null; draft = newDraft(); render(); window.scrollTo(0, 0);
@@ -1028,6 +1038,97 @@ function openNewChallenge() {
   openSheet('', draw);
 }
 
+
+/* ============ connected watches ============ */
+const WATCH_NAMES = { garmin: 'Garmin', coros: 'COROS', suunto: 'Suunto' };
+async function loadWatches() {
+  if (mode !== 'cloud') return;
+  let links;
+  try { links = await sb.from('watch_links').select('provider,connected_at,last_sync_at'); }
+  catch (e) { links = { error: e, data: [] }; }
+  let enabled = {}, fnOk = false;
+  if (sb.functions) {
+    try {
+      const { data, error } = await sb.functions.invoke('watches', { body: { action: 'providers' } });
+      if (!error && data) { enabled = data; fnOk = true; }
+    } catch (e) { /* function not deployed yet */ }
+  }
+  watches = { loaded: true, enabled, setup: !links.error && fnOk,
+    links: links.error ? {} : Object.fromEntries(links.data.map(l => [l.provider, l])) };
+  if (screen === 'app' && tab === 'pet' && !draft && !sheetOpen() && !isTyping()) {
+    const d = document.querySelector('details.settings'); const open = d && d.open;
+    render(); if (open) document.querySelector('details.settings').open = true;
+  }
+}
+function watchesCard() {
+  const row = id => {
+    const link = watches.links[id], on = watches.enabled[id];
+    let status, btn;
+    if (link) {
+      status = `<span class="ok-dot"></span>Connected${link.last_sync_at ? ` · synced ${fmtAgo(Date.parse(link.last_sync_at), Date.now())}` : ' · waiting for your next run'}`;
+      btn = `${id === 'suunto' ? `<button class="btn small" data-wsync="${id}">Sync</button>` : ''}<button class="btn small" data-woff="${id}">Disconnect</button>`;
+    } else if (on) {
+      status = 'Not connected';
+      btn = `<button class="btn small primary" data-won="${id}">Connect</button>`;
+    } else {
+      status = 'Coming soon';
+      btn = '';
+    }
+    return `<div class="wrow"><div class="wlogo ${id}">${WATCH_NAMES[id]}</div><div class="wstat small ${link ? '' : 'muted'}">${status}</div><div class="wbtns">${btn}</div></div>`;
+  };
+  return `<section class="card">
+    <h2>Your watches</h2>
+    ${['garmin', 'coros', 'suunto'].map(row).join('')}
+    <p class="small muted" style="margin:10px 0 0">${Object.values(watches.links).length
+      ? 'New runs from your watch feed your pet automatically after it syncs with the brand\'s app. Only runs from after connecting count.'
+      : 'Connect your watch and your runs feed your pet automatically. Brands marked "coming soon" are waiting for approval.'}</p>
+  </section>`;
+}
+function bindWatches() {
+  document.querySelectorAll('[data-won]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Opening…';
+    const { data, error } = await sb.functions.invoke('watches', { body: { action: 'connect', provider: b.dataset.won } });
+    if (error || !data || !data.url) { b.disabled = false; b.textContent = 'Connect'; return toast(`Couldn't start the connection. ${esc((data && data.error) || 'Try again.')}`); }
+    location.href = data.url;
+  });
+  document.querySelectorAll('[data-woff]').forEach(b => b.onclick = () => {
+    const id = b.dataset.woff;
+    confirmSheet(`Disconnect ${WATCH_NAMES[id]}?`, 'New runs from this watch will stop arriving. Runs already imported stay in your log.', 'Disconnect', async () => {
+      const { error } = await sb.functions.invoke('watches', { body: { action: 'disconnect', provider: id } });
+      if (error) return toast("Couldn't disconnect. Try again.");
+      toast(`${WATCH_NAMES[id]} disconnected.`); loadWatches();
+    });
+  });
+  document.querySelectorAll('[data-wsync]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Syncing…';
+    const { data, error } = await sb.functions.invoke('watches', { body: { action: 'sync', provider: b.dataset.wsync } });
+    if (error) { b.disabled = false; b.textContent = 'Sync'; return toast("Couldn't sync. Try again."); }
+    toast(data && data.imported ? `Imported ${data.imported} new run${data.imported === 1 ? '' : 's'}.` : 'No new runs.');
+    await refreshRuns(); loadWatches();
+  });
+}
+function showWatchReturn() {
+  const name = WATCH_NAMES[watchReturn.provider] || 'Your watch';
+  const msg = watchReturn.status === 'ok' ? `<b>${name} connected!</b> Your next run will feed your pet.`
+    : watchReturn.status === 'cancelled' ? `${name} wasn't connected.`
+    : watchReturn.reason === 'already_linked' ? `That ${name} account is already connected to another Runagotchi account.`
+    : `Couldn't connect ${name}. Please try again.`;
+  setTimeout(() => toast(msg, 6000), 300);
+}
+// Runs can arrive from a watch at any time: fetch them again when the app comes back.
+async function refreshRuns() {
+  if (mode !== 'cloud' || !profile) return;
+  const { data, error } = await sb.from('runs').select('id,started_at,km,dur_min,source').eq('user_id', profile.id).order('started_at', { ascending: false });
+  if (error || !S) return;
+  const fresh = data.map(rowToRun);
+  const added = fresh.filter(r => !S.runs.some(x => x.id === r.id));
+  if (!added.length && fresh.length === S.runs.length) return;
+  S.runs = fresh;
+  if (screen === 'app' && tab === 'pet' && !draft && !sheetOpen() && !isTyping()) render();
+  const fedKm = S.pet ? added.filter(r => r.date >= S.pet.createdAt).reduce((a, r) => a + r.km, 0) : 0;
+  if (fedKm && tab === 'pet') { feedFx(fedKm); toast(`${added.length} new run${added.length === 1 ? '' : 's'} from your watch!`); }
+}
+
 /* ============ add run ============ */
 function openAddRun() {
   openSheet(`<h3>Log a run</h3>
@@ -1086,6 +1187,6 @@ setInterval(() => {
   if (open) document.querySelector('details.settings').open = true;
 }, 60000);
 setInterval(() => { if (mode === 'cloud' && screen === 'app') { loadFriends(); loadChallenges(); } }, 5 * 60000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode === 'cloud' && screen === 'app') { loadFriends(); loadChallenges(); } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode === 'cloud' && screen === 'app') { refreshRuns(); loadFriends(); loadChallenges(); loadWatches(); } });
 
 boot();

@@ -4,9 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Runagotchi</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+@font-face{font-family:Fredoka;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/fredoka-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:Fredoka;font-style:normal;font-weight:500;font-display:swap;src:url(fonts/fredoka-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:Fredoka;font-style:normal;font-weight:600;font-display:swap;src:url(fonts/fredoka-latin-600-normal.woff2) format('woff2')}
+@font-face{font-family:Fredoka;font-style:normal;font-weight:700;font-display:swap;src:url(fonts/fredoka-latin-700-normal.woff2) format('woff2')}
+@font-face{font-family:'DM Mono';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/dm-mono-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:'DM Mono';font-style:normal;font-weight:500;font-display:swap;src:url(fonts/dm-mono-latin-500-normal.woff2) format('woff2')}
+
 :root{
   --bg:#f5efe3; --card:#fffaf1; --ink:#22201b; --muted:#77705f; --line:#e6dccb;
   --accent:#ff6b35; --accent-ink:#fff; --good:#2f9e6b; --warn:#e3a008; --bad:#d64545;
@@ -258,6 +263,19 @@ details.past{background:var(--card);border:1px solid var(--line);border-radius:v
 details.past summary{cursor:pointer;list-style:none;font-size:16px}
 details.past summary::-webkit-details-marker{display:none}
 details.past .card{margin:12px 0 0;border:0;padding:0;background:transparent}
+
+
+/* watches */
+.wrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.wrow:first-of-type{border-top:0}
+.wlogo{width:72px;flex:none;font-weight:700;font-size:13px;letter-spacing:.5px;text-align:center;padding:6px 0;border-radius:8px;color:#fff;background:#111}
+.wlogo.garmin{background:#007cc3}
+.wlogo.suunto{background:#222;letter-spacing:1.5px}
+.wlogo.coros{background:#e3241b}
+.wstat{flex:1;display:flex;align-items:center;gap:6px;min-width:0}
+.wbtns{display:flex;gap:6px}
+.ok-dot{width:8px;height:8px;border-radius:50%;background:var(--good);flex:none}
+.badge.watch{background:#e3ecff;color:#2d4f9e}
 
 /* pet animation */
 .pet-anim{transform-box:fill-box;transform-origin:50% 100%}
