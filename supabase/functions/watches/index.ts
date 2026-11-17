@@ -55,15 +55,15 @@ const garmin: Provider = {
   id: "garmin", name: "Garmin",
   enabled: () => !!(env("GARMIN_CLIENT_ID") && env("GARMIN_CLIENT_SECRET")),
   client: () => Promise.resolve({
-    tokenUrl: "https://diauth.garmin.com/di-oauth2-service/oauth/token", // CHECK
+    tokenUrl: "https://connectapi.garmin.com/di-oauth2-service/oauth/token", // per Garmin OAuth2 PKCE spec
     clientId: env("GARMIN_CLIENT_ID"), clientSecret: env("GARMIN_CLIENT_SECRET"), auth: "body",
   }),
-  authorizeUrl: (_db, state, challenge, redirect) => Promise.resolve("https://connect.garmin.com/oauth2Confirm?" + new URLSearchParams({ // CHECK
+  authorizeUrl: (_db, state, challenge, redirect) => Promise.resolve("https://connect.garmin.com/oauth2Confirm?" + new URLSearchParams({ // per Garmin OAuth2 PKCE spec
     client_id: env("GARMIN_CLIENT_ID"), response_type: "code", redirect_uri: redirect,
     state, code_challenge: challenge, code_challenge_method: "S256",
   })),
   async providerUserId(t) {
-    const r = await fetch("https://apis.garmin.com/wellness-api/rest/user/id", { headers: { Authorization: `Bearer ${t.access_token}` } }); // CHECK
+    const r = await fetch("https://apis.garmin.com/wellness-api/rest/user/id", { headers: { Authorization: `Bearer ${t.access_token}` } }); // per Garmin spec
     if (!r.ok) throw new Error(`Garmin user id: ${r.status}`);
     return String((await r.json()).userId);
   },
@@ -464,7 +464,7 @@ async function tokenRequest(db: SupabaseClient, p: Provider, params: Record<stri
 async function accessToken(db: SupabaseClient, userId: string, p: Provider, force = false) {
   const { data: row } = await db.from("watch_tokens").select("*").eq("user_id", userId).eq("provider", p.id).maybeSingle();
   if (!row) throw new Error("not connected");
-  const fresh = !row.expires_at || Date.parse(row.expires_at) - Date.now() > 5 * 60000;
+  const fresh = !row.expires_at || Date.parse(row.expires_at) - Date.now() > 10 * 60000; // Garmin: refresh >= 600 s early
   if ((!force && fresh) || !row.refresh_token) return row.access_token as string;
   const t = await tokenRequest(db, p, { grant_type: "refresh_token", refresh_token: row.refresh_token });
   await db.from("watch_tokens").update({
@@ -563,7 +563,7 @@ async function handleAction(req: Request, db: SupabaseClient) {
   }
   if (body.action === "disconnect") {
     if (p.id === "garmin") {
-      try { // let Garmin know, so it stops pushing this user's data. CHECK
+      try { // let Garmin know, so it stops pushing this user's data (Garmin asks apps to do this on disconnect)
         const tok = await accessToken(db, user.id, p);
         await fetch("https://apis.garmin.com/wellness-api/rest/user/registration", { method: "DELETE", headers: { Authorization: `Bearer ${tok}` } });
       } catch (_) { /* unlink anyway */ }
