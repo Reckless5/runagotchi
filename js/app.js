@@ -909,8 +909,8 @@ function renderRun() {
   const lead = (left + right) / 2 + span * per / 2;                    // keep the pack centred in its space
   const pos = i => lead - units[i] * per;
   const cartX = !riders.length ? null : n ? Math.max(2 + cartPct / 2, lead - span * per - 7 - cartPct / 2) : 50;
-  // The last healthy runners (not fainted or starved) pull the cart.
-  const pullers = riders.length ? list.map((x, i) => i).filter(i => !['dead', 'fainting'].includes(list[i].mood)).slice(-2) : [];
+  // Every runner (not fainted or starved) pulls the cart.
+  const pullers = riders.length ? list.map((x, i) => i).filter(i => !['dead', 'fainting'].includes(list[i].mood)) : [];
   const cartHtml = riders.length ? `<div class="cart ${pullers.length ? '' : 'parked'}" style="left:${cartX}%;width:${cartW}px;--rw:${riderW}px">
       <div class="riders">${riders.map(x => `<div class="rider">${petSVG(x.pet, x.mood, x.stage, 'c' + x.key.slice(0, 8))}</div>`).join('')}</div>
       <div class="box"></div><div class="handle"></div><span class="hitch"></span>
@@ -1497,7 +1497,7 @@ function bindDebug() {
 
 
 /* ============ cart ropes ============ */
-// Ropes from the cart's handle to the pets pulling it (drawn after layout).
+// One line from the cart's handle to each pet pulling it (drawn after layout).
 function drawRopes() {
   const scene = document.querySelector('.scene'), svg = scene && scene.querySelector('.ropes'), hitch = scene && scene.querySelector('.cart .hitch');
   if (!svg) return;
@@ -1509,8 +1509,7 @@ function drawRopes() {
   svg.innerHTML = [...scene.querySelectorAll('.runner[data-puller]')].map(el => {
     // offset* ignores the running bounce, so the rope doesn't jump around
     const x1 = el.offsetLeft - el.offsetWidth * 0.32, y1 = el.offsetTop + el.offsetHeight * 0.72;
-    const mx = (x0 + x1) / 2, my = Math.max(y0, y1) + 10;
-    return `<path d="M${x0} ${y0} Q${mx} ${my} ${x1} ${y1}" fill="none" stroke="#8a5a3c" stroke-width="3" stroke-linecap="round"/><path d="M${x0} ${y0} Q${mx} ${my} ${x1} ${y1}" fill="none" stroke="#c8935f" stroke-width="1.2" stroke-dasharray="3 4" stroke-linecap="round"/>`;
+    return `<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="#8a5a3c" stroke-width="2" stroke-linecap="round"/>`;
   }).join('');
 }
 
