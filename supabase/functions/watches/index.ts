@@ -346,9 +346,14 @@ export function suuntoWorkoutToActivity(w: any): Activity | null {
 
 const FOOD_PER_KM = 10, MAX_FOOD = 100, START_FOOD = 70, GRACE_H = 72, REVIVE_KM = 5;
 const WEEK_KM: Record<string, number> = { easy: 10, normal: 20, hard: 35 };
-export function simulate(bornMs: number, difficulty: string, runs: { date: number; km: number }[], tNow: number) {
+export function simulate(bornMs: number, difficulty: string, runs: { date: number; km: number }[], tNow: number, debug?: { food: number; at: number } | null) {
   const decayH = (WEEK_KM[difficulty] ?? 20) * FOOD_PER_KM / 7 / 24;
   let t = bornMs, f = START_FOOD, dead = false, zeroAt: number | null = null, deathAt: number | null = null, fedKm = 0;
+  if (debug) { // test accounts: "at debug.at the pet had debug.food food"
+    fedKm = runs.filter((r) => r.date >= bornMs && r.date < debug.at).reduce((a, r) => a + r.km, 0);
+    t = debug.at; f = Math.max(0, Math.min(MAX_FOOD, debug.food)); if (f === 0) zeroAt = t;
+    runs = runs.filter((r) => r.date >= debug.at);
+  }
   const adv = (to: number) => {
     if (to <= t) return;
     if (!dead) {
@@ -370,11 +375,12 @@ const stageOf = (km: number) => km < 25 ? "baby" : km < 100 ? "kid" : "grown";
 const levelOf = (km: number) => Math.floor(Math.sqrt(km / 2)) + 1;
 
 async function refreshSnapshot(db: SupabaseClient, userId: string) {
-  const { data: pet } = await db.from("pets").select("born_at,difficulty").eq("user_id", userId).maybeSingle();
+  const { data: pet } = await db.from("pets").select("*").eq("user_id", userId).maybeSingle();
   if (!pet) return;
   const { data: runs } = await db.from("runs").select("started_at,km").eq("user_id", userId);
   const now = Date.now();
-  const sim = simulate(Date.parse(pet.born_at), pet.difficulty, (runs ?? []).map((r) => ({ date: Date.parse(r.started_at), km: Number(r.km) })), now);
+  const debug = pet.debug_at && pet.debug_food != null ? { food: Number(pet.debug_food), at: Date.parse(pet.debug_at) } : null;
+  const sim = simulate(Date.parse(pet.born_at), pet.difficulty, (runs ?? []).map((r) => ({ date: Date.parse(r.started_at), km: Number(r.km) })), now, debug);
   const iso = (t: number | null) => t == null ? null : new Date(t).toISOString();
   await db.from("pets").update({
     food: Math.round(sim.f * 100) / 100, zero_at: iso(sim.zeroAt), dead: sim.dead, death_at: iso(sim.deathAt),

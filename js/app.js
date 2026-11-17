@@ -55,6 +55,13 @@ function simulate(st, tNow) {
   const decayH = DIFF[p.difficulty].km * FOOD_PER_KM / 7 / 24; // food per hour
   let t = p.createdAt, f = START_FOOD, dead = false, zeroAt = null, deathAt = null;
   let fedKm = 0, lastFeed = null, revives = 0;
+  // Test accounts: "at debugAt the pet had debugFood food"; hunger carries on from there.
+  const ov = p.debugAt != null && p.debugFood != null;
+  if (ov) {
+    fedKm = st.runs.filter(r => r.date >= p.createdAt && r.date < p.debugAt).reduce((a, r) => a + r.km, 0);
+    t = p.debugAt; f = Math.max(0, Math.min(MAX_FOOD, p.debugFood)); if (f === 0) zeroAt = t;
+  }
+  const from = ov ? p.debugAt : p.createdAt;
   const adv = to => {
     if (to <= t) return;
     if (!dead) {
@@ -68,7 +75,7 @@ function simulate(st, tNow) {
     }
     t = to;
   };
-  const runs = st.runs.filter(r => r.date >= p.createdAt && r.date <= tNow).sort((a, b) => a.date - b.date);
+  const runs = st.runs.filter(r => r.date >= from && r.date <= tNow).sort((a, b) => a.date - b.date);
   for (const r of runs) {
     adv(r.date);
     if (dead) {
@@ -185,7 +192,8 @@ function clearLocal() { try { localStorage.removeItem(LS_KEY); } catch (e) {} }
 const isGuest = () => { try { return localStorage.getItem(LS_GUEST) === '1'; } catch (e) { return false; } };
 const setGuest = v => { try { v ? localStorage.setItem(LS_GUEST, '1') : localStorage.removeItem(LS_GUEST); } catch (e) {} };
 
-const rowToPet = r => ({ name: r.name, shape: r.shape, color: r.color, pattern: r.pattern, acc: r.acc, difficulty: r.difficulty, createdAt: Date.parse(r.born_at) });
+const rowToPet = r => ({ name: r.name, shape: r.shape, color: r.color, pattern: r.pattern, acc: r.acc, difficulty: r.difficulty, createdAt: Date.parse(r.born_at),
+  debugFood: r.debug_food == null ? null : Number(r.debug_food), debugAt: r.debug_at ? Date.parse(r.debug_at) : null });
 const rowToRun = r => ({ id: r.id, date: Date.parse(r.started_at), km: Number(r.km), durMin: r.dur_min == null ? null : Number(r.dur_min), source: r.source });
 const runToRow = r => ({ id: r.id, user_id: profile.id, started_at: new Date(r.date).toISOString(), km: r.km, dur_min: r.durMin || null, source: r.source === 'coros' ? 'coros' : 'manual' });
 function snapshotRow() {
@@ -544,6 +552,7 @@ function renderPet() {
       <button class="btn primary" id="addRun">+ Log a run</button>
     </div>
 
+    ${debugCard()}
     ${incomingCard()}
     <section class="card">
       <h2>Runs <span class="small muted">${sim.lastFeed ? 'last fed ' + fmtAgo(sim.lastFeed) : ''}</span></h2>
@@ -564,7 +573,7 @@ function renderPet() {
         <summary>Settings</summary>
         ${account}
         <div class="row" style="margin-top:14px"><button class="btn small" id="editPet">Edit ${esc(p.name)}</button><span class="small muted">Appetite: ${DIFF[p.difficulty].label} (~${goal} km/week)</span></div>
-        ${mode === 'local' ? `
+        ${mode === 'local' || isDebug() ? `
         <div class="row" style="margin-top:14px"><span class="small"><b>Time machine</b> <span class="muted">(for testing hunger)</span></span></div>
         <div class="row" style="margin-top:6px">
           <button class="btn small" data-tm="12">+12 h</button><button class="btn small" data-tm="24">+1 day</button><button class="btn small" data-tm="72">+3 days</button>
@@ -585,6 +594,7 @@ function renderPet() {
   });
   document.querySelectorAll('[data-bud]').forEach(b => b.onclick = () => openRunBuddies(b.dataset.bud));
   bindIncoming();
+  bindDebug();
   if ($('#moreRuns')) $('#moreRuns').onclick = () => { showAllRuns = !showAllRuns; render(); };
   $('#editPet').onclick = () => { draft = { ...S.pet }; render(); window.scrollTo(0, 0); };
   document.querySelectorAll('[data-tm]').forEach(b => b.onclick = () => {
@@ -618,7 +628,7 @@ async function loadFriends() {
     const ids = [...new Set(rows.map(other))];
     const acceptedIds = rows.filter(r => r.status === 'accepted').map(other);
     const [pr, pe] = await Promise.all([
-      ids.length ? sb.from('profiles').select('id,username').in('id', ids) : { data: [] },
+      ids.length ? sb.from('profiles').select('*').in('id', ids) : { data: [] },
       acceptedIds.length ? sb.from('pets').select('*').in('user_id', acceptedIds) : { data: [] }
     ]);
     if (pr.error || pe.error) throw (pr.error || pe.error);
@@ -1341,6 +1351,52 @@ function openRenamePack() {
       closeSheet(); render();
       toast(name ? `Your running group is now <b>${esc(name)}</b>.` : 'Back to "The pack".');
     };
+  });
+}
+
+
+/* ============ debug (test accounts only) ============ */
+const isDebug = () => mode === 'cloud' && !!(profile && profile.is_debug);
+const DEBUG_STATES = [
+  { k: 'full', label: 'Full', food: 100, h: 0 }, { k: 'fine', label: 'Fine', food: 60, h: 0 },
+  { k: 'hungry', label: 'Hungry', food: 30, h: 0 }, { k: 'starving', label: 'Starving', food: 10, h: 0 },
+  { k: 'fainted', label: 'Fainted', food: 0, h: 1 }, { k: 'starved', label: 'Starved', food: 0, h: 73 },
+];
+function debugTargets() {
+  const list = [];
+  if (S && S.pet) list.push({ id: profile.id, label: `You · ${S.pet.name}`, sim: simulate(S, now()), override: S.pet.debugAt != null });
+  for (const id of acceptedFriendIds()) {
+    const pr = friends.profiles[id], pet = friends.pets[id];
+    if (pr && pr.is_debug && pet) list.push({ id, label: `@${pr.username} · ${pet.name}`, sim: simulateSnapshot(pet, Date.now()), override: pet.debug_at != null });
+  }
+  return list;
+}
+function debugCard() {
+  if (!isDebug()) return '';
+  const rows = debugTargets().map(x => `
+    <div class="dbg-row">
+      <div class="dbg-who"><b>${esc(x.label)}</b><span class="small muted">${moodOf(x.sim)} · ${Math.round(x.sim.f)} food${x.override ? ' · override on' : ''}</span></div>
+      <div class="chips">${DEBUG_STATES.map(st => `<button class="chip small" data-dbg="${x.id}|${st.k}">${st.label}</button>`).join('')}
+        ${x.override ? `<button class="chip small" data-dbg="${x.id}|reset">Reset</button>` : ''}</div>
+    </div>`).join('');
+  return `<section class="card dbg"><h2>🐞 Debug <span class="small muted">test account</span></h2>
+    ${rows}
+    <p class="small muted" style="margin:8px 0 0">Sets the pet's food right now (Fainted = empty for 1 h, Starved = empty for 73 h). Hunger keeps running and new runs still feed it. Test friends' pets can be changed too. Reset goes back to the real history. The time machine is in Settings.</p>
+  </section>`;
+}
+function bindDebug() {
+  document.querySelectorAll('[data-dbg]').forEach(b => b.onclick = async () => {
+    const [id, k] = b.dataset.dbg.split('|');
+    const st = DEBUG_STATES.find(x => x.k === k);
+    b.disabled = true;
+    const { error } = await sb.rpc('debug_set_pet', { p_target: id, p_food: st ? st.food : null, p_hours_ago: st ? st.h : 0 });
+    if (error) { b.disabled = false; return toast("Couldn't change it. " + esc(error.message || '')); }
+    if (id === profile.id) {
+      const { data } = await sb.from('pets').select('*').eq('user_id', profile.id).maybeSingle();
+      if (data) S.pet = rowToPet(data);
+    }
+    toast(st ? `Set to <b>${st.label}</b>.` : 'Back to the real history.');
+    render(); loadFriends();
   });
 }
 
