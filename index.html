@@ -280,6 +280,17 @@ details.past .card{margin:12px 0 0;border:0;padding:0;background:transparent}
 .diag{padding:0;font-size:12px;text-align:left;color:var(--muted)}
 .diag-out{background:#f3ecdf;border-radius:10px;padding:10px;font-size:11px;max-height:45vh;overflow:auto;white-space:pre-wrap;word-break:break-all;font-family:"DM Mono",monospace}
 
+
+/* running together */
+.runs .with{display:block;color:#b4531f;font-size:12px;margin-top:2px}
+.x.bud{font-size:16px}
+.blink{position:absolute;z-index:9;height:0;border-top:3px dashed rgba(255,107,53,.85);transform:translateY(50%);transition:left 1.2s ease,width 1.2s ease,bottom 1.2s ease;pointer-events:none}
+.blink span{position:absolute;left:50%;top:-13px;transform:translateX(-50%);width:22px;height:22px;border-radius:50%;background:#fff;display:grid;place-items:center;font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.2);animation:budpulse 1.6s ease-in-out infinite}
+@keyframes budpulse{0%,100%{transform:translateX(-50%) scale(1)}50%{transform:translateX(-50%) scale(1.15)}}
+.bud-note{color:#b4531f}
+.budbadge{display:inline-block;margin-top:4px;font-size:11px;font-weight:600;color:#b4531f;background:#fff1ea;border-radius:999px;padding:2px 8px}
+@media (prefers-reduced-motion:reduce){.blink span{animation:none}}
+
 /* pet animation */
 .pet-anim{transform-box:fill-box;transform-origin:50% 100%}
 .m-happy{animation:bounce 1.1s ease-in-out infinite}

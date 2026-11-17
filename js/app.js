@@ -36,6 +36,7 @@ let authMode = 'login';
 let friends = { loaded: false, loading: false, error: false, rows: [], profiles: {}, pets: {} };
 let challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
 let watches = { loaded: false, enabled: {}, links: {}, setup: true };
+let buddies = { loaded: false, mine: [], week: [] }, buddyPairs = new Set();
 const watchReturn = (() => { const q = new URLSearchParams(location.search); return q.get('watch') ? { provider: q.get('watch'), status: q.get('status'), reason: q.get('reason') } : null; })();
 if (watchReturn) history.replaceState(null, '', location.pathname);
 const now = () => Date.now() + devOffset;
@@ -300,6 +301,7 @@ async function onSession(uid) {
   friends = { loaded: false, loading: false, error: false, rows: [], profiles: {}, pets: {} };
   challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
   watches = { loaded: false, enabled: {}, links: {}, setup: true };
+  buddies = { loaded: false, mine: [], week: [] }; buddyPairs = new Set();
   profile = null; S = null; devOffset = 0;
   if (!uid) {
     if (isGuest()) return startLocal();
@@ -331,6 +333,7 @@ async function loadAccount() {
   loadFriends();
   loadChallenges();
   loadWatches();
+  loadBuddies();
   if (watchReturn) showWatchReturn();
 }
 // A pet made before logging in moves into the account the first time.
@@ -493,7 +496,7 @@ function header() {
     ${mode === 'cloud' ? `<div class="tabs four"><button data-tab="pet" class="${tab === 'pet' ? 'on' : ''}">My pet</button><button data-tab="run" class="${tab === 'run' ? 'on' : ''}">Run</button><button data-tab="challenge" class="${tab === 'challenge' ? 'on' : ''}">Challenge${invites ? `<span class="pill">${invites}</span>` : ''}</button><button data-tab="friends" class="${tab === 'friends' ? 'on' : ''}">Friends${incoming ? `<span class="pill">${incoming}</span>` : ''}</button></div>` : ''}`;
 }
 function bindHeader() {
-  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0, 0); if (tab !== 'pet') loadFriends(); if (tab === 'challenge') loadChallenges(); });
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0, 0); if (tab !== 'pet') loadFriends(); if (tab === 'challenge') loadChallenges(); if (tab === 'run' || tab === 'friends') loadBuddies(); });
 }
 function statusLine(sim, p) {
   const n = `<b>${esc(p.name)}</b>`;
@@ -541,12 +544,14 @@ function renderPet() {
       <button class="btn primary" id="addRun">+ Log a run</button>
     </div>
 
+    ${incomingCard()}
     <section class="card">
       <h2>Runs <span class="small muted">${sim.lastFeed ? 'last fed ' + fmtAgo(sim.lastFeed) : ''}</span></h2>
       ${shown.length ? `<ul class="runs">${shown.map(r => `
         <li>
           <div class="km">${fmtKm(r.km)} km</div>
-          <div class="meta">${fmtDate(r.date)}${WATCH_NAMES[r.source] ? `<span class="badge watch">${WATCH_NAMES[r.source]}</span>` : ''}${r.date < p.createdAt ? '<span class="badge pre">before hatch</span>' : ''}${r.date > t ? '<span class="badge pre">future</span>' : ''}<br>${[r.durMin ? Math.round(r.durMin) + ' min' : '', pace(r)].filter(Boolean).join(' · ')}</div>
+          <div class="meta">${fmtDate(r.date)}${WATCH_NAMES[r.source] ? `<span class="badge watch">${WATCH_NAMES[r.source]}</span>` : ''}${r.date < p.createdAt ? '<span class="badge pre">before hatch</span>' : ''}${r.date > t ? '<span class="badge pre">future</span>' : ''}<br>${[r.durMin ? Math.round(r.durMin) + ' min' : '', pace(r)].filter(Boolean).join(' · ')}${tagsForRun(r.id).length ? `<span class="with">🤝 with ${tagsForRun(r.id).map(id => '@' + esc(unameOf(id))).join(', ')}</span>` : ''}</div>
+          ${acceptedFriendIds().length ? `<button class="x bud" data-bud="${r.id}" aria-label="Who ran with you" title="Who ran with you?">👥</button>` : ''}
           <button class="x" data-del="${r.id}" aria-label="Delete run">×</button>
         </li>`).join('')}</ul>
         ${sorted.length > 6 ? `<button class="btn small ghost" id="moreRuns" style="margin-top:6px">${showAllRuns ? 'Show fewer' : 'Show all ' + sorted.length + ' runs'}</button>` : ''}`
@@ -578,6 +583,8 @@ function renderPet() {
       S.runs = S.runs.filter(x => x.id !== r.id); render(); persistDeleteRun(r.id);
     });
   });
+  document.querySelectorAll('[data-bud]').forEach(b => b.onclick = () => openRunBuddies(b.dataset.bud));
+  bindIncoming();
   if ($('#moreRuns')) $('#moreRuns').onclick = () => { showAllRuns = !showAllRuns; render(); };
   $('#editPet').onclick = () => { draft = { ...S.pet }; render(); window.scrollTo(0, 0); };
   document.querySelectorAll('[data-tm]').forEach(b => b.onclick = () => {
@@ -652,6 +659,7 @@ function renderFriends() {
       <button class="more" data-unf="${row.id}" aria-label="Remove friend">⋯</button>
       <div class="nm">${esc(pet.name)}</div>
       <div class="un">@${esc(name(id))} · seen ${fmtAgo(Date.parse(pet.snapshot_at), t)}</div>
+      ${areBuddies(me, id) ? '<div class="budbadge">🤝 Ran together this week</div>' : ''}
       ${bar(sim.f, 'minibar')}
       <div class="st ${st.bad ? 'bad' : ''}">${st.txt}</div>
     </div>`;
@@ -755,7 +763,7 @@ function runners() {
   list.forEach(x => { x.mood = moodOf(x.sim); x.strength = strengthOf(x.sim, x.level); });
   return list.sort((a, b) => b.strength - a.strength || b.level - a.level || a.pet.name.localeCompare(b.pet.name));
 }
-const runSignature = () => runners().map(x => x.key + ':' + x.mood + ':' + x.strength).join('|') + (friends.loaded ? '' : '…');
+const runSignature = () => runners().map(x => x.key + ':' + x.mood + ':' + x.strength).join('|') + (friends.loaded ? '' : '…') + [...buddyPairs].sort().join(',');
 
 const svgUri = s => `url('data:image/svg+xml,${encodeURIComponent(s)}')`;
 function sceneLayers(night) {
@@ -781,17 +789,42 @@ function skyFor(hour) {
   return { night: false, bg: 'linear-gradient(#7cc4ff, #bfe3ff 65%, #e6f5ff)', orb: '<div class="sun"></div>' };
 }
 function renderRun() {
-  const list = runners();
+  const ranked = runners();
   lastRunSig = runSignature();
-  const n = list.length;
+  const n = ranked.length;
   const sky = skyFor(new Date().getHours());
+  // Buddies who ran together this week form one group: the group runs where its
+  // strongest member would, and its members run side by side.
+  const idOf = x => x.me ? profile.id : x.key;
+  const parent = ranked.map((_, i) => i);
+  const root = i => parent[i] === i ? i : (parent[i] = root(parent[i]));
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (areBuddies(idOf(ranked[i]), idOf(ranked[j]))) parent[root(j)] = root(i);
+  // Inside a group, line pets up as a chain of real running pairs: start at a pet
+  // with the fewest buddies and keep stepping to an unvisited buddy.
+  const nb = i => ranked.map((_, j) => j).filter(j => j !== i && areBuddies(idOf(ranked[i]), idOf(ranked[j])));
+  const order = [], done = new Set();
+  ranked.forEach((_, i) => {
+    const r = root(i); if (done.has(r)) return; done.add(r);
+    const members = ranked.map((__, j) => j).filter(j => root(j) === r);
+    const left = new Set(members);
+    let cur = members.slice().sort((x, y) => nb(x).length - nb(y).length || x - y)[0];
+    while (cur !== undefined) {
+      order.push(cur); left.delete(cur);
+      const next = nb(cur).filter(j => left.has(j)).sort((x, y) => nb(x).filter(k => left.has(k)).length - nb(y).filter(k => left.has(k)).length || x - y)[0];
+      cur = next !== undefined ? next : [...left][0];
+    }
+  });
+  const list = order.map(i => ranked[i]), group = order.map(i => root(i));
   const LANES = [{ b: 44, z: 3, s: 1 }, { b: 70, z: 1, s: .86 }, { b: 20, z: 5, s: 1.08 }]; // middle, back, front
   const base = n > 8 ? 70 : n > 4 ? 84 : 100;
   // Pets with the same status run as a tight group; a new status starts a gap.
-  const STEP = 1.4, GAP = 3.6;
+  const STEP = 1.4, GAP = 3.6, BUDDY = 1.2;
   const units = []; let u = 0, laneIdx = [], li = 0;
   list.forEach((x, i) => {
-    if (i > 0) { const same = x.mood === list[i - 1].mood; u += same ? STEP : GAP; li = same ? li + 1 : 0; }
+    if (i > 0) {
+      const together = group[i] === group[i - 1], same = together || x.mood === list[i - 1].mood;
+      u += together ? BUDDY : same ? STEP : GAP; li = same ? li + 1 : 0;
+    }
     units.push(u); laneIdx.push(li);
   });
   const span = u, per = span ? Math.min(68 / span, 9) : 0; // % of scene width per unit
@@ -807,22 +840,33 @@ function renderRun() {
       ${petSVG(x.pet, x.mood, x.stage, 'r' + x.key.slice(0, 8), true)}
     </div>`;
   }).join('');
+  // The friendship symbol between buddies running next to each other.
+  const linkHtml = list.map((x, i) => {
+    if (i === 0 || group[i] !== group[i - 1] || !areBuddies(idOf(x), idOf(list[i - 1]))) return '';
+    const a = pos(i), b = pos(i - 1), la = LANES[laneIdx[i] % 3], lb = LANES[laneIdx[i - 1] % 3];
+    const y = Math.round(Math.min(la.b, lb.b) + base * 0.14); // at the feet, like holding hands
+    return `<div class="blink" style="left:${a}%;width:${b - a}%;bottom:${y}px"><span>🤝</span></div>`;
+  }).join('');
   // Name tags live on their own layer so no pet ever covers them.
   const tagHtml = list.map((x, i) => `<div class="tag ${x.me ? 'me' : ''}" style="left:${pos(i)}%;bottom:${LANES[laneIdx[i] % 3].b - 14}px">${x.me ? '<b>You</b> · ' : ''}${esc(x.pet.name)}</div>`).join('');
-  const rows = list.map((x, i) => `
+  const nameById = Object.fromEntries(ranked.map(x => [idOf(x), x.me ? 'you' : x.pet.name]));
+  const rows = ranked.map((x, i) => {
+    const bud = buddiesOf(idOf(x)).filter(id => nameById[id]).map(id => nameById[id]);
+    return `
     <li class="${x.me ? 'me' : ''}">
       <span class="rank">${i + 1}</span>
-      <span class="who"><b>${esc(x.pet.name)}</b><span class="small muted">${x.me ? 'you' : '@' + esc(x.user)} · LV ${x.level}</span></span>
+      <span class="who"><b>${esc(x.pet.name)}</b><span class="small muted">${x.me ? 'you' : '@' + esc(x.user)} · LV ${x.level}</span>${bud.length ? `<span class="small bud-note">🤝 with ${bud.map(esc).join(', ')}</span>` : ''}</span>
       <span class="str"><span class="sbar"><i style="width:${Math.max(0, x.strength)}%"></i></span><span class="small ${x.strength < 15 ? 'bad' : 'muted'}">${label(x)}</span></span>
-    </li>`).join('');
+    </li>`;
+  }).join('');
   $('#app').innerHTML = `${header()}
     <div class="scene ${sky.night ? 'night' : ''}" style="background:${sky.bg}">
       ${sky.orb}
       ${sceneLayers(sky.night)}
-      ${n ? runnerHtml + tagHtml : ''}
+      ${n ? runnerHtml + linkHtml + tagHtml : ''}
       ${n <= 1 ? `<div class="scene-note">${!friends.loaded && !friends.error ? 'Loading friends…' : 'Add friends to run together!'}</div>` : ''}
     </div>
-    <p class="small muted center" style="margin:8px 0 14px">Strongest pets lead the pack, the weakest trail behind. Strength = how full a pet is, plus its level.</p>
+    <p class="small muted center" style="margin:8px 0 14px">Strongest pets lead the pack, the weakest trail behind. Friends who ran together this week run side by side 🤝</p>
     ${n ? `<section class="card"><h2>The pack <button class="btn small ghost" id="rrefresh">${friends.loading ? 'Loading…' : 'Refresh'}</button></h2><ol class="pack">${rows}</ol>
       ${n === 1 ? `<div class="empty">Only you so far. <button class="linkbtn" id="goFriends">Add friends</button></div>` : ''}</section>` : ''}`;
   bindHeader();
@@ -1165,6 +1209,110 @@ async function refreshRuns() {
   if (fedKm && tab === 'pet') { feedFx(fedKm); toast(`${added.length} new run${added.length === 1 ? '' : 's'} from your watch!`); }
 }
 
+
+/* ============ running together ============ */
+// Monday 00:00 of the current week, local time.
+const weekStart = (t = Date.now()) => { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); };
+const pairKey = (a, b) => [a, b].sort().join('|');
+const areBuddies = (a, b) => buddyPairs.has(pairKey(a, b));
+// Everyone on the same run (the runner plus everyone tagged) ran together.
+function computeBuddyPairs() {
+  const since = weekStart(), byRun = {};
+  for (const r of buddies.week) {
+    if (Date.parse(r.started_at) < since) continue;
+    (byRun[r.run_id] ??= new Set([r.owner_id])).add(r.friend_id);
+  }
+  const pairs = new Set();
+  for (const set of Object.values(byRun)) {
+    const a = [...set];
+    for (let i = 0; i < a.length; i++) for (let j = i + 1; j < a.length; j++) pairs.add(pairKey(a[i], a[j]));
+  }
+  return pairs;
+}
+const buddiesOf = id => [...buddyPairs].map(k => k.split('|')).filter(([a, b]) => a === id || b === id).map(([a, b]) => a === id ? b : a);
+async function loadBuddies() {
+  if (mode !== 'cloud' || !profile) return;
+  try {
+    const cols = 'run_id,owner_id,friend_id,started_at,km';
+    const [mine, week] = await Promise.all([
+      sb.from('run_companions').select(cols).eq('owner_id', profile.id),
+      sb.from('run_companions').select(cols).gte('started_at', new Date(weekStart()).toISOString())
+    ]);
+    if (mine.error || week.error) throw (mine.error || week.error);
+    const before = [...buddyPairs].sort().join(',') + buddies.mine.length + buddies.week.length;
+    buddies = { loaded: true, mine: mine.data, week: week.data };
+    buddyPairs = computeBuddyPairs();
+    if (before === [...buddyPairs].sort().join(',') + buddies.mine.length + buddies.week.length) return;
+  } catch (e) { console.error(e); return; }
+  if (screen === 'app' && !draft && !sheetOpen() && !isTyping()) render();
+}
+const tagsForRun = runId => buddies.mine.filter(r => r.run_id === runId).map(r => r.friend_id);
+const acceptedFriendIds = () => mode === 'cloud' ? friends.rows.filter(r => r.status === 'accepted')
+  .map(r => r.requester === profile.id ? r.addressee : r.requester).sort((a, b) => unameOf(a).localeCompare(unameOf(b))) : [];
+const friendChips = sel => acceptedFriendIds().map(id => `<button type="button" class="chip ${sel.has(id) ? 'sel' : ''}" data-buddy="${id}">@${esc(unameOf(id))}</button>`).join('');
+function bindChips(el, sel) {
+  el.querySelectorAll('[data-buddy]').forEach(b => b.onclick = () => {
+    const id = b.dataset.buddy; sel.has(id) ? sel.delete(id) : sel.add(id); b.classList.toggle('sel', sel.has(id));
+  });
+}
+async function saveRunBuddies(runId, add, remove) {
+  if (add.length) {
+    const { error } = await sb.from('run_companions').insert(add.map(f => ({ run_id: runId, owner_id: profile.id, friend_id: f })));
+    if (error) { console.error(error); toast("Couldn't save who you ran with. " + esc(dbErrorText(error))); return false; }
+  }
+  for (const f of remove) await sb.from('run_companions').delete().eq('run_id', runId).eq('friend_id', f);
+  await loadBuddies();
+  return true;
+}
+function openRunBuddies(runId) {
+  const r = S.runs.find(x => x.id === runId); if (!r) return;
+  const cur = new Set(tagsForRun(runId)), sel = new Set(cur);
+  openSheet(`<h3>Who ran with you?</h3><p class="small muted" style="margin-top:0">${fmtKm(r.km)} km · ${fmtDate(r.date)}</p>
+    <div class="chips">${friendChips(sel)}</div>
+    <p class="small muted">Everyone who runs together this week gets a 🤝 and runs side by side in the Run tab.</p>
+    <div class="grid2" style="margin-top:12px"><button class="btn" id="bx">Cancel</button><button class="btn primary" id="bs">Save</button></div>`, el => {
+    bindChips(el, sel);
+    el.querySelector('#bx').onclick = closeSheet;
+    el.querySelector('#bs').onclick = async () => {
+      closeSheet();
+      if (await saveRunBuddies(runId, [...sel].filter(x => !cur.has(x)), [...cur].filter(x => !sel.has(x)))) toast('Saved.');
+    };
+  });
+}
+// Friends who tagged you in a run this week that you haven't logged yourself.
+const DISMISS_KEY = 'runagotchi.dismissedTags';
+function incomingTags() {
+  if (mode !== 'cloud' || !S) return [];
+  let dismissed = []; try { dismissed = JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]'); } catch (e) {}
+  return buddies.week.filter(r => r.friend_id === profile.id && !dismissed.includes(r.run_id)
+    && !S.runs.some(x => Math.abs(x.date - Date.parse(r.started_at)) < 3 * H));
+}
+function incomingCard() {
+  const tags = incomingTags();
+  if (!tags.length) return '';
+  return `<section class="card"><h2>🤝 Ran with you</h2>${tags.map(r => `
+    <div class="req"><div class="who">@${esc(unameOf(r.owner_id))} <span style="font-weight:400">ran ${fmtDist(Number(r.km))} km with you</span>
+      <div class="small muted" style="font-weight:400">${fmtDate(Date.parse(r.started_at))}</div></div>
+      <button class="x" data-tagdis="${r.run_id}" aria-label="Dismiss">×</button><button class="btn small primary" data-taglog="${r.run_id}">Log it too</button></div>`).join('')}
+  </section>`;
+}
+function bindIncoming() {
+  document.querySelectorAll('[data-tagdis]').forEach(b => b.onclick = () => {
+    let d = []; try { d = JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]'); } catch (e) {}
+    d.push(b.dataset.tagdis); try { localStorage.setItem(DISMISS_KEY, JSON.stringify(d.slice(-200))); } catch (e) {}
+    render();
+  });
+  document.querySelectorAll('[data-taglog]').forEach(b => b.onclick = async () => {
+    const t = buddies.week.find(r => r.run_id === b.dataset.taglog); if (!t) return;
+    const run = { id: newId(), date: Date.parse(t.started_at), km: Number(t.km), durMin: null, source: 'manual' };
+    S.runs.push(run); render();
+    if (run.date >= S.pet.createdAt) feedFx(run.km);
+    await persistAddRuns([run]);
+    if (acceptedFriendIds().includes(t.owner_id)) await saveRunBuddies(run.id, [t.owner_id], []);
+    toast(`Logged! You and <b>@${esc(unameOf(t.owner_id))}</b> ran together this week 🤝`);
+  });
+}
+
 /* ============ add run ============ */
 function openAddRun() {
   openSheet(`<h3>Log a run</h3>
@@ -1173,10 +1321,12 @@ function openAddRun() {
       <div class="field" style="margin-top:0"><label for="rd">Time (min) <span class="muted small">optional</span></label><input id="rd" class="text mono" inputmode="numeric" placeholder="28" autocomplete="off"></div>
     </div>
     <div class="field"><label for="rt">When</label><input id="rt" type="datetime-local" class="text" value="${localInputValue(now())}"></div>
+    ${acceptedFriendIds().length ? `<div class="field"><span class="lbl">Ran with <span class="muted small">optional</span></span><div class="chips">${friendChips(new Set())}</div></div>` : ''}
     <div class="err" id="rerr"></div>
     <div class="grid2" style="margin-top:8px"><button class="btn" id="rc">Cancel</button><button class="btn primary" id="rs">Feed ${esc(S.pet.name)}</button></div>`,
     el => {
       const k = el.querySelector('#rk'); setTimeout(() => k.focus(), 50);
+      const with_ = new Set(); bindChips(el, with_);
       el.querySelector('#rc').onclick = closeSheet;
       el.querySelector('#rs').onclick = async () => {
         const km = parseFloat(k.value.replace(',', '.'));
@@ -1195,6 +1345,7 @@ function openAddRun() {
         if (when >= S.pet.createdAt) feedFx(km);
         else toast(`Saved. That run is from before ${esc(S.pet.name)} hatched, so it doesn't count as food.`);
         await persistAddRuns([run]);
+        if (with_.size && await saveRunBuddies(run.id, [...with_], [])) toast(`Saved. You ran with ${[...with_].map(id => '<b>@' + esc(unameOf(id)) + '</b>').join(', ')} 🤝`);
       };
       el.querySelectorAll('input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') el.querySelector('#rs').click(); }));
     });
@@ -1223,6 +1374,6 @@ setInterval(() => {
   if (open) document.querySelector('details.settings').open = true;
 }, 60000);
 setInterval(() => { if (mode === 'cloud' && screen === 'app') { loadFriends(); loadChallenges(); } }, 5 * 60000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode === 'cloud' && screen === 'app') { refreshRuns(); loadFriends(); loadChallenges(); loadWatches(); } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode === 'cloud' && screen === 'app') { refreshRuns(); loadFriends(); loadChallenges(); loadWatches(); loadBuddies(); } });
 
 boot();
