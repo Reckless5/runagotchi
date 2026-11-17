@@ -63,7 +63,9 @@ https://uqwuhdwhzuqudnvubwep.supabase.co/functions/v1/watches/webhook/suunto?key
 
 ---
 
-## COROS: Partner API
+## COROS: Partner API (optional)
+
+COROS already works without approval through its self-service connection (checked every 30 minutes). The Partner API would add instant push notifications. Apply when you want that.
 
 **Where:** email **api@coros.com** and fill in COROS's application form (linked from https://support.coros.com/hc/en-us/articles/53181766856724).
 

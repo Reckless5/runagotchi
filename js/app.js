@@ -1055,6 +1055,7 @@ async function loadWatches() {
   }
   watches = { loaded: true, enabled, setup: !links.error && fnOk,
     links: links.error ? {} : Object.fromEntries(links.data.map(l => [l.provider, l])) };
+  autoSyncCoros();
   if (screen === 'app' && tab === 'pet' && !draft && !sheetOpen() && !isTyping()) {
     const d = document.querySelector('details.settings'); const open = d && d.open;
     render(); if (open) document.querySelector('details.settings').open = true;
@@ -1066,7 +1067,7 @@ function watchesCard() {
     let status, btn;
     if (link) {
       status = `<span class="ok-dot"></span>Connected${link.last_sync_at ? ` · synced ${fmtAgo(Date.parse(link.last_sync_at), Date.now())}` : ' · waiting for your next run'}`;
-      btn = `${id === 'suunto' ? `<button class="btn small" data-wsync="${id}">Sync</button>` : ''}<button class="btn small" data-woff="${id}">Disconnect</button>`;
+      btn = `${id !== 'garmin' ? `<button class="btn small" data-wsync="${id}">Sync</button>` : ''}<button class="btn small" data-woff="${id}">Disconnect</button>`;
     } else if (on) {
       status = 'Not connected';
       btn = `<button class="btn small primary" data-won="${id}">Connect</button>`;
@@ -1074,13 +1075,14 @@ function watchesCard() {
       status = 'Coming soon';
       btn = '';
     }
-    return `<div class="wrow"><div class="wlogo ${id}">${WATCH_NAMES[id]}</div><div class="wstat small ${link ? '' : 'muted'}">${status}</div><div class="wbtns">${btn}</div></div>`;
+    const diag = link && id === 'coros' ? `<button class="linkbtn small diag" data-wdiag="${id}">Check connection</button>` : '';
+    return `<div class="wrow"><div class="wlogo ${id}">${WATCH_NAMES[id]}</div><div class="wstat small ${link ? '' : 'muted'}"><span>${status}${diag}</span></div><div class="wbtns">${btn}</div></div>`;
   };
   return `<section class="card">
     <h2>Your watches</h2>
     ${['garmin', 'coros', 'suunto'].map(row).join('')}
     <p class="small muted" style="margin:10px 0 0">${Object.values(watches.links).length
-      ? 'New runs from your watch feed your pet automatically after it syncs with the brand\'s app. Only runs from after connecting count.'
+      ? `New runs from your watch feed your pet automatically after it syncs with the brand's app${watches.links.coros ? ' (COROS is checked every 30 minutes and when you open the app)' : ''}. Only runs from after connecting count.`
       : 'Connect your watch and your runs feed your pet automatically. Brands marked "coming soon" are waiting for approval.'}</p>
   </section>`;
 }
@@ -1099,12 +1101,45 @@ function bindWatches() {
       toast(`${WATCH_NAMES[id]} disconnected.`); loadWatches();
     });
   });
+  document.querySelectorAll('[data-wdiag]').forEach(b => b.onclick = () => openDiagnostics(b.dataset.wdiag));
   document.querySelectorAll('[data-wsync]').forEach(b => b.onclick = async () => {
     b.disabled = true; b.textContent = 'Syncing…';
     const { data, error } = await sb.functions.invoke('watches', { body: { action: 'sync', provider: b.dataset.wsync } });
-    if (error) { b.disabled = false; b.textContent = 'Sync'; return toast("Couldn't sync. Try again."); }
+    if (error) { b.disabled = false; b.textContent = 'Sync'; return toast(`Couldn't sync. ${b.dataset.wsync === 'coros' ? 'Tap “Check connection” for details.' : 'Try again.'}`); }
     toast(data && data.imported ? `Imported ${data.imported} new run${data.imported === 1 ? '' : 's'}.` : 'No new runs.');
     await refreshRuns(); loadWatches();
+  });
+}
+// COROS doesn't push new runs, so ask for them when the app opens (at most every 10 minutes).
+let corosSyncing = false, corosAutoAt = 0;
+async function autoSyncCoros() {
+  const link = watches.links.coros;
+  if (!link || corosSyncing || Date.now() - corosAutoAt < 10 * 60000) return;
+  if (link.last_sync_at && Date.now() - Date.parse(link.last_sync_at) < 10 * 60000) return;
+  corosSyncing = true; corosAutoAt = Date.now();
+  try {
+    const { data, error } = await sb.functions.invoke('watches', { body: { action: 'sync', provider: 'coros' } });
+    if (!error && data && data.imported) await refreshRuns();
+    if (!error) {
+      const l = await sb.from('watch_links').select('provider,connected_at,last_sync_at').eq('provider', 'coros').maybeSingle();
+      if (l.data) watches.links.coros = l.data;
+      if (screen === 'app' && tab === 'pet' && !draft && !sheetOpen() && !isTyping()) render();
+    }
+  } catch (e) { console.error(e); }
+  corosSyncing = false;
+}
+function openDiagnostics(id) {
+  openSheet(`<h3>Checking ${WATCH_NAMES[id]}…</h3><div class="spinner" style="margin:30px auto"></div>`);
+  sb.functions.invoke('watches', { body: { action: 'diagnose', provider: id } }).then(({ data, error }) => {
+    const text = JSON.stringify(error ? { error: String(error.message || error) } : data, null, 2);
+    const found = data && Array.isArray(data.found) ? data.found.filter(a => a.isRun).length : null;
+    openSheet(`<h3>${WATCH_NAMES[id]} connection</h3>
+      <p class="small muted" style="margin-top:0">${found != null ? `Found ${found} run${found === 1 ? '' : 's'} in the last few days using “${esc(data.picked)}”.` : 'Something didn\'t work.'} If runs are missing, copy this and send it to whoever maintains the app.</p>
+      <pre class="diag-out">${esc(text)}</pre>
+      <div class="grid2" style="margin-top:10px"><button class="btn" id="dgc">Close</button><button class="btn primary" id="dgcopy">Copy</button></div>`, el => {
+      el.querySelector('#dgc').onclick = closeSheet;
+      el.querySelector('#dgcopy').onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Copied.'); } catch (e) { toast('Copy failed. Select the text and copy it by hand.'); } };
+    });
   });
 }
 function showWatchReturn() {
@@ -1113,6 +1148,7 @@ function showWatchReturn() {
     : watchReturn.status === 'cancelled' ? `${name} wasn't connected.`
     : watchReturn.reason === 'already_linked' ? `That ${name} account is already connected to another Runagotchi account.`
     : `Couldn't connect ${name}. Please try again.`;
+  if (watchReturn.status === 'ok' && watchReturn.provider === 'coros') corosAutoAt = 0;
   setTimeout(() => toast(msg, 6000), 300);
 }
 // Runs can arrive from a watch at any time: fetch them again when the app comes back.

@@ -1,21 +1,24 @@
 // Runagotchi "watches" server function (Supabase Edge Function).
 //
 // Connects Garmin, Suunto and COROS accounts and turns the runs those watches
-// send us into Runagotchi runs (which feed the pet).
+// record into Runagotchi runs (which feed the pet).
 //
-//   POST /watches                       {action: "providers"}            which brands are switched on
-//   POST /watches                       {action: "connect", provider}    -> {url} to the brand's login page
-//   POST /watches                       {action: "disconnect", provider}
-//   POST /watches                       {action: "sync", provider}       pull recent runs (Suunto)
-//   GET  /watches/callback/<provider>   the brand sends the user back here after login
-//   POST /watches/webhook/<provider>?key=WEBHOOK_KEY   the brand pushes new activities here
+//   POST /watches  {action: "providers"}                which brands are switched on
+//   POST /watches  {action: "connect", provider}        -> {url} to the brand's login page
+//   POST /watches  {action: "disconnect", provider}
+//   POST /watches  {action: "sync", provider}           fetch new runs now (COROS, Suunto)
+//   POST /watches  {action: "diagnose", provider}       what COROS offers (to tune the import)
+//   GET  /watches/callback/<provider>                   the brand sends the user back here after login
+//   POST /watches/webhook/<provider>?key=WEBHOOK_KEY    Garmin/Suunto push new activities here
+//   POST /watches/cron?key=WEBHOOK_KEY                  scheduled: fetch new COROS runs for everyone
 //
-// A brand is switched on as soon as its secrets are set (Edge Functions → Secrets).
-// Endpoints marked "CHECK" come from public sources; confirm them against the
-// brand's developer docs once your access is approved.
+// Garmin and Suunto switch on when their secrets are set (Edge Functions → Secrets).
+// COROS uses its self-service connection (OAuth 2.0 + MCP, no approval needed):
+// the function registers itself with COROS on first use.
+// Lines marked "CHECK" come from public sources; confirm them against the brand's docs.
 //
 // Deploy with "Verify JWT" turned OFF: the brands can't send a Supabase login.
-// The function checks the user's login itself for connect/disconnect/sync.
+// The function checks the user's login itself for the app actions.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
@@ -27,20 +30,22 @@ const SUPABASE_URL = env("SUPABASE_URL");
 const APP_URL = env("APP_URL") || "https://runagotchi.netlify.app";
 const WEBHOOK_KEY = env("WEBHOOK_KEY");
 const FN_URL = `${SUPABASE_URL}/functions/v1/watches`;
+const COROS_MCP = env("COROS_MCP_URL") || "https://mcp.coros.com/mcp";
+const MCP_VERSION = "2025-06-18";
+const H = 3.6e6, DAY = 24 * H;
 
 export type ProviderId = "garmin" | "suunto" | "coros";
 export type Activity = { externalId: string; startMs: number; km: number; durMin: number | null; isRun: boolean };
 type Tokens = { access_token: string; refresh_token?: string; expires_in?: number; [k: string]: unknown };
+type Client = { tokenUrl: string; clientId: string; clientSecret: string | null; auth: "body" | "basic" | "none"; extra?: Record<string, string> };
 
 interface Provider {
   id: ProviderId;
   name: string;
   enabled(): boolean;
-  authorizeUrl(state: string, challenge: string, redirect: string): string;
-  tokenUrl(): string;
-  tokenAuth: "body" | "basic";
-  usesPkce: boolean;
-  providerUserId(t: Tokens): Promise<string>;
+  client(db: SupabaseClient): Promise<Client>;
+  authorizeUrl(db: SupabaseClient, state: string, challenge: string, redirect: string): Promise<string>;
+  providerUserId(t: Tokens, appUserId: string): Promise<string>;
   apiHeaders?(): Record<string, string>;
 }
 
@@ -48,13 +53,14 @@ interface Provider {
 const garmin: Provider = {
   id: "garmin", name: "Garmin",
   enabled: () => !!(env("GARMIN_CLIENT_ID") && env("GARMIN_CLIENT_SECRET")),
-  // CHECK: Garmin OAuth2 PKCE spec
-  authorizeUrl: (state, challenge, redirect) => "https://connect.garmin.com/oauth2Confirm?" + new URLSearchParams({
+  client: () => Promise.resolve({
+    tokenUrl: "https://diauth.garmin.com/di-oauth2-service/oauth/token", // CHECK
+    clientId: env("GARMIN_CLIENT_ID"), clientSecret: env("GARMIN_CLIENT_SECRET"), auth: "body",
+  }),
+  authorizeUrl: (_db, state, challenge, redirect) => Promise.resolve("https://connect.garmin.com/oauth2Confirm?" + new URLSearchParams({ // CHECK
     client_id: env("GARMIN_CLIENT_ID"), response_type: "code", redirect_uri: redirect,
     state, code_challenge: challenge, code_challenge_method: "S256",
-  }),
-  tokenUrl: () => "https://diauth.garmin.com/di-oauth2-service/oauth/token", // CHECK
-  tokenAuth: "body", usesPkce: true,
+  })),
   async providerUserId(t) {
     const r = await fetch("https://apis.garmin.com/wellness-api/rest/user/id", { headers: { Authorization: `Bearer ${t.access_token}` } }); // CHECK
     if (!r.ok) throw new Error(`Garmin user id: ${r.status}`);
@@ -67,32 +73,237 @@ const SUUNTO_API = "https://cloudapi.suunto.com/v2"; // CHECK
 const suunto: Provider = {
   id: "suunto", name: "Suunto",
   enabled: () => !!(env("SUUNTO_CLIENT_ID") && env("SUUNTO_CLIENT_SECRET") && env("SUUNTO_SUBSCRIPTION_KEY")),
-  authorizeUrl: (state, _c, redirect) => "https://cloudapi-oauth.suunto.com/oauth/authorize?" + new URLSearchParams({ // CHECK
-    client_id: env("SUUNTO_CLIENT_ID"), response_type: "code", redirect_uri: redirect, state,
+  client: () => Promise.resolve({
+    tokenUrl: "https://cloudapi-oauth.suunto.com/oauth/token", // CHECK
+    clientId: env("SUUNTO_CLIENT_ID"), clientSecret: env("SUUNTO_CLIENT_SECRET"), auth: "basic",
   }),
-  tokenUrl: () => "https://cloudapi-oauth.suunto.com/oauth/token", // CHECK
-  tokenAuth: "basic", usesPkce: false,
+  authorizeUrl: (_db, state, _c, redirect) => Promise.resolve("https://cloudapi-oauth.suunto.com/oauth/authorize?" + new URLSearchParams({ // CHECK
+    client_id: env("SUUNTO_CLIENT_ID"), response_type: "code", redirect_uri: redirect, state,
+  })),
   providerUserId: (t) => Promise.resolve(String(t.user ?? t.username ?? "")), // the token response names the Suunto user
   apiHeaders: () => ({ "Ocp-Apim-Subscription-Key": env("SUUNTO_SUBSCRIPTION_KEY") }),
 };
 
-// --- COROS (Partner API; OAuth 2.0). COROS shares its docs after approval, so
-// every endpoint is a secret you fill in from those docs. ---
+// --- COROS (self-service: OAuth 2.0 against the COROS MCP endpoint) ---
+// Standard MCP authorization: find the login server from the MCP endpoint's
+// metadata, register Runagotchi once (dynamic client registration), then a
+// normal OAuth 2.0 login with PKCE for each user.
+async function fetchJson(url: string) {
+  const r = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return await r.json();
+}
+export async function discoverCoros() {
+  const base = new URL(COROS_MCP);
+  let authServer: string | null = null, scopes: string[] | undefined;
+  // 1) Protected resource metadata (RFC 9728), directly or via the 401 challenge.
+  for (const u of [`${base.origin}/.well-known/oauth-protected-resource${base.pathname}`, `${base.origin}/.well-known/oauth-protected-resource`]) {
+    try { const j = await fetchJson(u); authServer = j.authorization_servers?.[0] ?? null; scopes = j.scopes_supported; if (authServer) break; } catch { /* try next */ }
+  }
+  if (!authServer) {
+    try {
+      const r = await fetch(COROS_MCP, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" }) });
+      const m = (r.headers.get("www-authenticate") ?? "").match(/resource_metadata="([^"]+)"/);
+      await r.body?.cancel();
+      if (m) { const j = await fetchJson(m[1]); authServer = j.authorization_servers?.[0] ?? null; scopes = j.scopes_supported; }
+    } catch { /* fall back to the MCP origin */ }
+  }
+  authServer ??= base.origin;
+  // 2) Authorization server metadata (RFC 8414 / OpenID discovery).
+  const a = new URL(authServer), path = a.pathname === "/" ? "" : a.pathname.replace(/\/$/, "");
+  for (const u of [`${a.origin}/.well-known/oauth-authorization-server${path}`, `${a.origin}/.well-known/openid-configuration${path}`, `${a.origin}${path}/.well-known/openid-configuration`]) {
+    try {
+      const m = await fetchJson(u);
+      if (m.authorization_endpoint && m.token_endpoint) return { ...m, scopes_supported: scopes ?? m.scopes_supported } as Record<string, any>;
+    } catch { /* try next */ }
+  }
+  throw new Error("COROS login server not found");
+}
+async function corosClientRow(db: SupabaseClient) {
+  const { data } = await db.from("oauth_clients").select("*").eq("provider", "coros").maybeSingle();
+  if (data) return data;
+  const meta = await discoverCoros();
+  if (!meta.registration_endpoint) throw new Error("COROS offers no self-registration");
+  const methods: string[] = meta.token_endpoint_auth_methods_supported ?? ["none"];
+  const wanted = methods.includes("none") ? "none" : methods.includes("client_secret_post") ? "client_secret_post" : "client_secret_basic";
+  const r = await fetch(meta.registration_endpoint, {
+    method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      client_name: "Runagotchi", client_uri: APP_URL, policy_uri: `${APP_URL}/privacy.html`,
+      redirect_uris: [`${FN_URL}/callback/coros`], grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"], token_endpoint_auth_method: wanted,
+      ...(meta.scopes_supported ? { scope: meta.scopes_supported.join(" ") } : {}),
+    }),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`COROS registration: ${r.status} ${text.slice(0, 200)}`);
+  const reg = JSON.parse(text);
+  const row = {
+    provider: "coros", client_id: reg.client_id, client_secret: reg.client_secret ?? null,
+    auth_method: reg.token_endpoint_auth_method ?? wanted,
+    meta: { authorization_endpoint: meta.authorization_endpoint, token_endpoint: meta.token_endpoint, scopes_supported: meta.scopes_supported ?? null },
+  };
+  const { error } = await db.from("oauth_clients").upsert(row);
+  if (error) throw error;
+  return row;
+}
 const coros: Provider = {
   id: "coros", name: "COROS",
-  enabled: () => !!(env("COROS_CLIENT_ID") && env("COROS_CLIENT_SECRET") && env("COROS_AUTHORIZE_URL") && env("COROS_TOKEN_URL")),
-  authorizeUrl: (state, _c, redirect) => env("COROS_AUTHORIZE_URL") + "?" + new URLSearchParams({
-    client_id: env("COROS_CLIENT_ID"), response_type: "code", redirect_uri: redirect, state,
-  }),
-  tokenUrl: () => env("COROS_TOKEN_URL"),
-  tokenAuth: "body", usesPkce: false,
-  providerUserId: (t) => Promise.resolve(String(t.openId ?? t.open_id ?? t.user_id ?? t.userId ?? "")),
+  enabled: () => env("COROS_DISABLED") !== "1",
+  async client(db) {
+    const c = await corosClientRow(db);
+    return {
+      tokenUrl: c.meta.token_endpoint, clientId: c.client_id, clientSecret: c.client_secret,
+      auth: c.auth_method === "client_secret_basic" ? "basic" : c.auth_method === "client_secret_post" ? "body" : "none",
+      extra: { resource: COROS_MCP },
+    };
+  },
+  async authorizeUrl(db, state, challenge, redirect) {
+    const c = await corosClientRow(db);
+    const q: Record<string, string> = {
+      client_id: c.client_id, response_type: "code", redirect_uri: redirect, state,
+      code_challenge: challenge, code_challenge_method: "S256", resource: COROS_MCP,
+    };
+    if (c.meta.scopes_supported?.length) q.scope = c.meta.scopes_supported.join(" ");
+    return c.meta.authorization_endpoint + (c.meta.authorization_endpoint.includes("?") ? "&" : "?") + new URLSearchParams(q);
+  },
+  // The login doesn't name the COROS user, but the access token usually does.
+  providerUserId: (t, appUserId) => Promise.resolve(jwtSubject(t.access_token) ?? (t.id_token ? jwtSubject(String(t.id_token)) : null) ?? `app:${appUserId}`),
 };
 
 export const PROVIDERS: Record<ProviderId, Provider> = { garmin, suunto, coros };
 
 // ---------------------------------------------------------------------------
-// Turning brand payloads into runs (pure functions, unit-tested)
+// MCP client (Streamable HTTP transport) for COROS
+
+export function parseSse(text: string, id: number) {
+  for (const block of text.split(/\r?\n\r?\n/)) {
+    const data = block.split(/\r?\n/).filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart()).join("\n");
+    if (!data) continue;
+    try { const msg = JSON.parse(data); if (msg.id === id) return msg; } catch { /* not JSON */ }
+  }
+  throw new Error("no response in event stream");
+}
+class AuthError extends Error {}
+async function mcpSession(token: string) {
+  let sid: string | null = null, nextId = 0;
+  const rpc = async (method: string, params: unknown = {}, notify = false): Promise<any> => {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token}`, "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream", "MCP-Protocol-Version": MCP_VERSION,
+    };
+    if (sid) headers["Mcp-Session-Id"] = sid;
+    const msg: any = notify ? { jsonrpc: "2.0", method, params } : { jsonrpc: "2.0", id: ++nextId, method, params };
+    const r = await fetch(COROS_MCP, { method: "POST", headers, body: JSON.stringify(msg) });
+    sid = r.headers.get("mcp-session-id") ?? sid;
+    if (r.status === 401) { await r.body?.cancel(); throw new AuthError("COROS login expired"); }
+    if (notify) { await r.body?.cancel(); return null; }
+    if (!r.ok) throw new Error(`COROS ${method}: ${r.status} ${(await r.text()).slice(0, 200)}`);
+    const resp = (r.headers.get("content-type") ?? "").includes("text/event-stream") ? parseSse(await r.text(), msg.id) : await r.json();
+    if (resp.error) throw new Error(`COROS ${method}: ${resp.error.message ?? JSON.stringify(resp.error)}`);
+    return resp.result;
+  };
+  await rpc("initialize", { protocolVersion: MCP_VERSION, capabilities: {}, clientInfo: { name: "runagotchi", version: "1.0" } });
+  await rpc("notifications/initialized", {}, true);
+  return rpc;
+}
+
+// Pick the tool that lists activities and fill in its date arguments.
+export function pickActivityTool(tools: any[]) {
+  const scored = tools.map((t) => {
+    const txt = `${t.name} ${t.description ?? ""}`;
+    let s = 0;
+    if (/activit|workout|exercise|training record|sport record/i.test(t.name)) s += 4;
+    if (/activit|workout/i.test(txt)) s += 2;
+    if (/list|query|records|search|history|recent|get/i.test(t.name)) s += 2;
+    if (/detail|fit|file|lap|segment|track|gps|create|delete|update|write|plan|upload|sleep|hrv|health/i.test(t.name)) s -= 5;
+    return { t, s };
+  }).filter((x) => x.s > 0).sort((a, b) => b.s - a.s);
+  return scored[0]?.t ?? null;
+}
+const pad = (n: number) => String(n).padStart(2, "0");
+const ymd = (ms: number, sep: string) => { const d = new Date(ms); return `${d.getUTCFullYear()}${sep}${pad(d.getUTCMonth() + 1)}${sep}${pad(d.getUTCDate())}`; };
+export function activityArgs(tool: any, fromMs: number, toMs: number) {
+  const props: Record<string, any> = tool?.inputSchema?.properties ?? {};
+  const args: Record<string, unknown> = {};
+  const dateValue = (p: any, ms: number) => {
+    const desc = `${p.description ?? ""} ${p.format ?? ""} ${p.pattern ?? ""}`;
+    if (p.type === "integer" || p.type === "number") {
+      if (/yyyymmdd/i.test(desc)) return Number(ymd(ms, ""));
+      return /milli|\bms\b/i.test(desc) ? ms : Math.floor(ms / 1000);
+    }
+    if (/yyyymmdd/i.test(desc) && !/yyyy-mm-dd/i.test(desc)) return ymd(ms, "");
+    if (/date-time|iso ?8601|timestamp|hh:mm/i.test(desc)) return new Date(ms).toISOString();
+    return ymd(ms, "-");
+  };
+  for (const [k, p] of Object.entries(props)) {
+    if (/(start|from|begin|since|after)/i.test(k) && /(date|day|time|at|$)/i.test(k)) args[k] = dateValue(p, fromMs);
+    else if (/(end|to|until|before)/i.test(k) && /(date|day|time|at|$)/i.test(k)) args[k] = dateValue(p, toMs);
+    else if (/^(limit|size|pagesize|page_size|count|max)/i.test(k)) args[k] = Math.min(Number(p.maximum ?? 100), 100);
+    else if (/^(page|pagenum|page_number|pageno)$/i.test(k)) args[k] = 1;
+    else if (/sport|type/i.test(k) && Array.isArray(p.enum)) { const run = p.enum.find((v: unknown) => /run/i.test(String(v))); if (run !== undefined) args[k] = run; }
+  }
+  return args;
+}
+
+// Find activities anywhere in a tool result: objects with a distance and a start time.
+const COROS_RUN_CODES = new Set((env("COROS_RUN_SPORT_TYPES") || "100,101,102,103").split(",").map((x) => Number(x.trim())));
+function toMs(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  if (typeof v === "number" || /^\d+$/.test(String(v))) {
+    const n = Number(v);
+    if (n >= 19000101 && n <= 21001231) { const s = String(n); return Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), 12); } // YYYYMMDD
+    if (n > 1e12) return n;
+    if (n > 1e9) return n * 1000;
+    return null;
+  }
+  const t = Date.parse(String(v).replace(" ", "T"));
+  return isNaN(t) ? null : t;
+}
+export function extractActivities(result: any): Activity[] {
+  const roots: unknown[] = [];
+  if (result?.structuredContent) roots.push(result.structuredContent);
+  for (const c of result?.content ?? []) {
+    if (c?.type !== "text" || !c.text) continue;
+    try { roots.push(JSON.parse(c.text)); } catch {
+      const m = c.text.match(/[\[{][\s\S]*[\]}]/);
+      if (m) { try { roots.push(JSON.parse(m[0])); } catch { /* prose */ } }
+    }
+  }
+  const out = new Map<string, Activity>();
+  const pick = (o: Record<string, unknown>, re: RegExp) => Object.keys(o).find((k) => re.test(k));
+  const visit = (v: unknown, depth: number) => {
+    if (depth > 6 || v == null) return;
+    if (Array.isArray(v)) { v.forEach((x) => visit(x, depth + 1)); return; }
+    if (typeof v !== "object") return;
+    const o = v as Record<string, unknown>;
+    const dk = pick(o, /^(total_?)?distance(_?(km|meters?|m))?$/i) ?? pick(o, /distance/i);
+    const sk = pick(o, /^(start_?(time|date|timestamp)?|begin_?time|date|start_?at|local_?start)$/i) ?? pick(o, /start/i);
+    if (dk && sk && (typeof o[dk] === "number" || /^[\d.]+$/.test(String(o[dk])))) {
+      let km = Number(o[dk]);
+      if (/km/i.test(dk)) { /* already km */ } else if (/meter|_m$|M$/i.test(dk) || km > 300) km = km / 1000;
+      const startMs = toMs(o[sk]);
+      const tk = pick(o, /^(total_?)?(time|duration|elapsed_?time|moving_?time|workout_?time)(_?(s|sec|seconds|in_?seconds))?$/i);
+      let dur = tk ? Number(o[tk]) : NaN;
+      if (tk && /ms|milli/i.test(tk)) dur = dur / 1000;
+      const typeKey = pick(o, /^(sport_?(type|name)?|activity_?type|type|mode|sport_?mode|name)$/i);
+      const tv = typeKey ? o[typeKey] : undefined;
+      const isRun = tv == null ? true : (typeof tv === "number" || /^\d+$/.test(String(tv))) ? COROS_RUN_CODES.has(Number(tv)) : /run/i.test(String(tv));
+      const idKey = pick(o, /^(label_?id|activity_?id|workout_?id|id|uuid)$/i);
+      if (startMs && km > 0) {
+        const externalId = String(idKey ? o[idKey] : `${startMs}-${km}`);
+        out.set(externalId, { externalId, startMs, km, durMin: isFinite(dur) && dur > 0 ? dur / 60 : null, isRun });
+      }
+      return;
+    }
+    Object.values(o).forEach((x) => visit(x, depth + 1));
+  };
+  roots.forEach((r) => visit(r, 0));
+  return [...out.values()];
+}
+
+// ---------------------------------------------------------------------------
+// Turning Garmin / Suunto payloads into runs (pure functions, unit-tested)
 
 const isRunType = (t: unknown) => /run/i.test(String(t ?? ""));
 
@@ -132,7 +343,7 @@ export function suuntoWorkoutToActivity(w: any): Activity | null {
 // ---------------------------------------------------------------------------
 // Pet snapshot (same rules as js/app.js) so friends see the fed pet right away
 
-const FOOD_PER_KM = 10, MAX_FOOD = 100, START_FOOD = 70, GRACE_H = 72, REVIVE_KM = 5, H = 3.6e6;
+const FOOD_PER_KM = 10, MAX_FOOD = 100, START_FOOD = 70, GRACE_H = 72, REVIVE_KM = 5;
 const WEEK_KM: Record<string, number> = { easy: 10, normal: 20, hard: 35 };
 export function simulate(bornMs: number, difficulty: string, runs: { date: number; km: number }[], tNow: number) {
   const decayH = (WEEK_KM[difficulty] ?? 20) * FOOD_PER_KM / 7 / 24;
@@ -185,6 +396,15 @@ const randomString = (n = 48) => b64url(crypto.getRandomValues(new Uint8Array(n)
 export async function pkceChallenge(verifier: string) {
   return b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
 }
+export function jwtSubject(token: string): string | null {
+  try {
+    const part = token.split(".")[1];
+    if (!part) return null;
+    const p = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=")));
+    const sub = p.sub ?? p.user_id ?? p.userId ?? p.uid ?? p.openId;
+    return sub ? String(sub) : null;
+  } catch { return null; }
+}
 function safeEqual(a: string, b: string) {
   if (!a || !b || a.length !== b.length) return false;
   let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -194,7 +414,9 @@ async function hmacHex(secret: string, body: string) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-const admin = () => createClient(SUPABASE_URL, env("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false } });
+let dbFactory = (): SupabaseClient => createClient(SUPABASE_URL, env("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false } });
+const admin = () => dbFactory();
+export const __test = { setDb(db: unknown) { dbFactory = () => db as SupabaseClient; } }; // tests only
 
 async function userFrom(req: Request, db: SupabaseClient) {
   const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
@@ -203,24 +425,25 @@ async function userFrom(req: Request, db: SupabaseClient) {
   return data.user ?? null;
 }
 
-async function tokenRequest(p: Provider, params: Record<string, string>): Promise<Tokens> {
-  const id = env(`${p.id.toUpperCase()}_CLIENT_ID`), secret = env(`${p.id.toUpperCase()}_CLIENT_SECRET`);
+async function tokenRequest(db: SupabaseClient, p: Provider, params: Record<string, string>): Promise<Tokens> {
+  const c = await p.client(db);
   const headers: Record<string, string> = { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" };
-  const body = new URLSearchParams(params);
-  if (p.tokenAuth === "basic") headers.Authorization = "Basic " + btoa(`${id}:${secret}`);
-  else { body.set("client_id", id); body.set("client_secret", secret); }
-  const r = await fetch(p.tokenUrl(), { method: "POST", headers, body });
+  const body = new URLSearchParams({ ...params, ...(c.extra ?? {}) });
+  if (c.auth === "basic") headers.Authorization = "Basic " + btoa(`${c.clientId}:${c.clientSecret ?? ""}`);
+  else { body.set("client_id", c.clientId); if (c.auth === "body" && c.clientSecret) body.set("client_secret", c.clientSecret); }
+  const r = await fetch(c.tokenUrl, { method: "POST", headers, body });
   const text = await r.text();
   if (!r.ok) throw new Error(`${p.name} token: ${r.status} ${text.slice(0, 200)}`);
   return JSON.parse(text);
 }
 
 // A valid access token for this user, refreshed when it is about to expire.
-async function accessToken(db: SupabaseClient, userId: string, p: Provider) {
+async function accessToken(db: SupabaseClient, userId: string, p: Provider, force = false) {
   const { data: row } = await db.from("watch_tokens").select("*").eq("user_id", userId).eq("provider", p.id).maybeSingle();
   if (!row) throw new Error("not connected");
-  if (!row.expires_at || Date.parse(row.expires_at) - Date.now() > 5 * 60000 || !row.refresh_token) return row.access_token as string;
-  const t = await tokenRequest(p, { grant_type: "refresh_token", refresh_token: row.refresh_token });
+  const fresh = !row.expires_at || Date.parse(row.expires_at) - Date.now() > 5 * 60000;
+  if ((!force && fresh) || !row.refresh_token) return row.access_token as string;
+  const t = await tokenRequest(db, p, { grant_type: "refresh_token", refresh_token: row.refresh_token });
   await db.from("watch_tokens").update({
     access_token: t.access_token, refresh_token: t.refresh_token ?? row.refresh_token,
     expires_at: t.expires_in ? new Date(Date.now() + t.expires_in * 1000).toISOString() : null, updated_at: new Date().toISOString(),
@@ -229,8 +452,8 @@ async function accessToken(db: SupabaseClient, userId: string, p: Provider) {
 }
 
 // Save runs (duplicates ignored), then update the pet and the "last sync" time.
-async function importActivities(db: SupabaseClient, userId: string, p: ProviderId, acts: Activity[]) {
-  const runs = acts.filter((a) => a.isRun && a.km > 0.05 && a.km <= 400 && a.startMs > 0).map((a) => ({
+async function importActivities(db: SupabaseClient, userId: string, p: ProviderId, acts: Activity[], notBefore = 0) {
+  const runs = acts.filter((a) => a.isRun && a.km > 0.05 && a.km <= 400 && a.startMs >= notBefore && a.startMs <= Date.now() + 60000).map((a) => ({
     user_id: userId, started_at: new Date(a.startMs).toISOString(), km: Math.round(a.km * 100) / 100,
     dur_min: a.durMin ? Math.round(a.durMin * 10) / 10 : null, source: p, external_id: a.externalId,
   }));
@@ -252,6 +475,48 @@ async function unlink(db: SupabaseClient, userId: string, p: ProviderId) {
 }
 
 // ---------------------------------------------------------------------------
+// Pulling runs: COROS (MCP) and Suunto
+
+async function corosSession(db: SupabaseClient, userId: string) {
+  try { return await mcpSession(await accessToken(db, userId, coros)); }
+  catch (e) { if (e instanceof AuthError) return await mcpSession(await accessToken(db, userId, coros, true)); throw e; }
+}
+async function syncCoros(db: SupabaseClient, userId: string, diagnose = false) {
+  const { data: link } = await db.from("watch_links").select("connected_at,last_sync_at").eq("user_id", userId).eq("provider", "coros").maybeSingle();
+  if (!link) throw new Error("not connected");
+  const connected = Date.parse(link.connected_at);
+  const from = Math.max(connected, (link.last_sync_at ? Date.parse(link.last_sync_at) : connected) - 2 * DAY) - DAY;
+  const to = Date.now() + DAY;
+  const rpc = await corosSession(db, userId);
+  const tools: any[] = (await rpc("tools/list", {})).tools ?? [];
+  const tool = pickActivityTool(tools);
+  if (!tool) {
+    if (diagnose) return { tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })), picked: null };
+    throw new Error("COROS: no activity tool found");
+  }
+  const args = activityArgs(tool, from, to);
+  const result = await rpc("tools/call", { name: tool.name, arguments: args });
+  const acts = extractActivities(result);
+  if (diagnose) {
+    return {
+      tools: tools.map((t) => ({ name: t.name, description: (t.description ?? "").slice(0, 300), inputSchema: t.inputSchema })),
+      picked: tool.name, args, found: acts, raw: JSON.stringify(result).slice(0, 4000),
+    };
+  }
+  return { imported: await importActivities(db, userId, "coros", acts, connected) };
+}
+async function syncSuunto(db: SupabaseClient, userId: string) {
+  const tok = await accessToken(db, userId, suunto);
+  const { data: link } = await db.from("watch_links").select("connected_at").eq("user_id", userId).eq("provider", "suunto").maybeSingle();
+  const since = link ? Date.parse(link.connected_at) : Date.now() - 7 * DAY;
+  const r = await fetch(`${SUUNTO_API}/workouts?since=${since}&limit=100`, { headers: { Authorization: `Bearer ${tok}`, ...suunto.apiHeaders!() } }); // CHECK
+  if (!r.ok) throw new Error(`Suunto workouts: ${r.status}`);
+  const payload = await r.json();
+  const acts = (payload.payload ?? payload.workouts ?? []).map(suuntoWorkoutToActivity).filter(Boolean) as Activity[];
+  return { imported: await importActivities(db, userId, "suunto", acts, since) };
+}
+
+// ---------------------------------------------------------------------------
 // Routes
 
 async function handleAction(req: Request, db: SupabaseClient) {
@@ -268,9 +533,10 @@ async function handleAction(req: Request, db: SupabaseClient) {
     if (!p.enabled()) return json({ error: `${p.name} isn't set up yet.` }, 400);
     await db.from("oauth_states").delete().lt("created_at", new Date(Date.now() - 3600_000).toISOString());
     const state = randomString(24), verifier = randomString(48);
+    const url = await p.authorizeUrl(db, state, await pkceChallenge(verifier), `${FN_URL}/callback/${p.id}`);
     const { error } = await db.from("oauth_states").insert({ state, user_id: user.id, provider: p.id, code_verifier: verifier });
     if (error) throw error;
-    return json({ url: p.authorizeUrl(state, await pkceChallenge(verifier), `${FN_URL}/callback/${p.id}`) });
+    return json({ url });
   }
   if (body.action === "disconnect") {
     if (p.id === "garmin") {
@@ -283,15 +549,13 @@ async function handleAction(req: Request, db: SupabaseClient) {
     return json({ ok: true });
   }
   if (body.action === "sync") {
-    if (p.id !== "suunto") return json({ imported: 0, note: `${p.name} sends new runs automatically.` });
-    const tok = await accessToken(db, user.id, p);
-    const { data: link } = await db.from("watch_links").select("connected_at").eq("user_id", user.id).eq("provider", p.id).maybeSingle();
-    const since = link ? Date.parse(link.connected_at) : Date.now() - 7 * 24 * H;
-    const r = await fetch(`${SUUNTO_API}/workouts?since=${since}&limit=100`, { headers: { Authorization: `Bearer ${tok}`, ...p.apiHeaders!() } }); // CHECK
-    if (!r.ok) throw new Error(`Suunto workouts: ${r.status}`);
-    const payload = await r.json();
-    const acts = (payload.payload ?? payload.workouts ?? []).map(suuntoWorkoutToActivity).filter(Boolean) as Activity[];
-    return json({ imported: await importActivities(db, user.id, p.id, acts) });
+    if (p.id === "coros") return json(await syncCoros(db, user.id));
+    if (p.id === "suunto") return json(await syncSuunto(db, user.id));
+    return json({ imported: 0, note: `${p.name} sends new runs automatically.` });
+  }
+  if (body.action === "diagnose" && p.id === "coros") {
+    try { return json(await syncCoros(db, user.id, true)); }
+    catch (e) { return json({ error: String((e as Error).message ?? e) }); }
   }
   return json({ error: "Unknown action." }, 400);
 }
@@ -305,9 +569,9 @@ async function handleCallback(url: URL, p: Provider, db: SupabaseClient) {
   if (!st || st.provider !== p.id || Date.now() - Date.parse(st.created_at) > 15 * 60000) return back("error", "expired");
   try {
     const params: Record<string, string> = { grant_type: "authorization_code", code, redirect_uri: `${FN_URL}/callback/${p.id}` };
-    if (p.usesPkce) params.code_verifier = st.code_verifier;
-    const t = await tokenRequest(p, params);
-    const providerUserId = await p.providerUserId(t);
+    if (p.id !== "suunto") params.code_verifier = st.code_verifier; // Garmin and COROS use PKCE
+    const t = await tokenRequest(db, p, params);
+    const providerUserId = await p.providerUserId(t, st.user_id);
     if (!providerUserId) throw new Error("no user id from " + p.name);
     const other = await userForProviderAccount(db, p.id, providerUserId);
     if (other && other !== st.user_id) return back("error", "already_linked");
@@ -361,10 +625,23 @@ async function handleWebhook(req: Request, url: URL, p: Provider, db: SupabaseCl
       if (act) imported += await importActivities(db, uid, "suunto", [act]);
     }
   } else {
-    // COROS: the push format is in COROS's partner docs (shared after approval).
-    console.log("COROS webhook received but not implemented yet", raw.slice(0, 500));
+    console.log("COROS webhook received (Partner API not set up)", raw.slice(0, 500));
   }
   return json({ ok: true, imported });
+}
+
+// Scheduled: fetch new COROS runs for everyone who hasn't synced in a while.
+async function handleCron(url: URL, db: SupabaseClient) {
+  if (!safeEqual(url.searchParams.get("key") ?? "", WEBHOOK_KEY)) return json({ error: "forbidden" }, 403);
+  const stale = new Date(Date.now() - 25 * 60000).toISOString();
+  const { data: links } = await db.from("watch_links").select("user_id,last_sync_at").eq("provider", "coros")
+    .or(`last_sync_at.is.null,last_sync_at.lt.${stale}`).order("last_sync_at", { ascending: true, nullsFirst: true }).limit(25);
+  let imported = 0, failed = 0;
+  for (const l of links ?? []) {
+    try { imported += (await syncCoros(db, l.user_id) as { imported: number }).imported; }
+    catch (e) { failed++; console.error("cron coros", l.user_id, e); }
+  }
+  return json({ ok: true, users: (links ?? []).length, imported, failed });
 }
 
 export async function handler(req: Request): Promise<Response> {
@@ -376,6 +653,7 @@ export async function handler(req: Request): Promise<Response> {
   const db = admin();
   try {
     if (!route && req.method === "POST") return await handleAction(req, db);
+    if (route === "cron" && req.method === "POST") return await handleCron(url, db);
     const p = PROVIDERS[pid as ProviderId];
     if (!p) return json({ error: "not found" }, 404);
     if (route === "callback" && req.method === "GET") return await handleCallback(url, p, db);
@@ -383,7 +661,8 @@ export async function handler(req: Request): Promise<Response> {
     return json({ error: "not found" }, 404);
   } catch (e) {
     console.error(e);
-    return json({ error: "Something went wrong. Try again in a moment." }, 500);
+    const msg = String((e as Error)?.message ?? e);
+    return json({ error: /COROS/.test(msg) ? msg : "Something went wrong. Try again in a moment." }, 500);
   }
 }
 
