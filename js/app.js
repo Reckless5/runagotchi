@@ -833,6 +833,14 @@ function durLabel(c) {
   return d ? d.label : days + ' days';
 }
 const fmtDist = km => (Math.round(km * 10) / 10).toString().replace(/\.0$/, '');
+// Turn a database error into something the user can act on.
+function dbErrorText(e) {
+  const m = (e && (e.message || '')) + ' ' + (e && e.code || '');
+  if (/challenge/i.test(m) && /(schema cache|does not exist|PGRST20|42P01|42883)/i.test(m))
+    return 'The challenge tables are missing in Supabase. Run supabase/002_challenges.sql in the SQL Editor.';
+  if (/row-level security|42501/i.test(m)) return 'The database refused this (security rule). Details: ' + (e.message || e.code);
+  return (e && e.message) ? 'Details: ' + e.message : 'Check your connection and try again.';
+}
 
 async function loadChallenges() {
   if (mode !== 'cloud' || challenges.loading) return;
@@ -860,7 +868,7 @@ async function loadChallenges() {
       cheers: chr.data.filter(x => x.challenge_id === c.id)
     })).sort((a, b) => a.end - b.end);
     challenges = { ...challenges, loaded: true, loading: false, error: false, list };
-  } catch (e) { console.error(e); challenges.loading = false; challenges.error = true; }
+  } catch (e) { console.error(e); challenges.loading = false; challenges.error = dbErrorText(e); }
   if (screen === 'app' && !draft && !sheetOpen() && !isTyping() && tab !== 'run') render();
 }
 
@@ -928,7 +936,7 @@ function renderChallenge() {
   const past = challenges.list.filter(c => myStatus(c) === 'joined' && c.end <= t).sort((a, b) => b.end - a.end);
   $('#app').innerHTML = `${header()}
     <button class="btn primary" id="newCh" style="width:100%;margin-bottom:14px">+ New challenge</button>
-    ${challenges.error ? `<div class="err" style="margin-bottom:10px">Couldn't load challenges. <button class="linkbtn" id="chRetry">Try again</button></div>` : ''}
+    ${challenges.error ? `<div class="err" style="margin-bottom:10px">Couldn't load challenges. ${esc(typeof challenges.error === 'string' ? challenges.error : '')} <button class="linkbtn" id="chRetry">Try again</button></div>` : ''}
     ${invites.length ? `<section class="card"><h2>You've been challenged</h2>${invites.map(c => `
       <div class="req"><div class="who">@${esc(unameOf(c.creator))}: <span style="font-weight:500">${fmtDist(c.distance_km)} km in ${durLabel(c)}</span>
         <div class="small muted" style="font-weight:400">${fmtHours((c.end - t) / H)} left · ${c.members.filter(m => m.status === 'joined').length} joined</div></div>
@@ -1008,10 +1016,10 @@ function openNewChallenge() {
       const go = el.querySelector('#ncgo'); go.disabled = true;
       const id = newId();
       const { error } = await sb.from('challenges').insert({ id, creator: profile.id, distance_km: Math.round(st.km * 10) / 10, ends_at: new Date(Date.now() + d.days * D).toISOString() });
-      if (error) { go.disabled = false; err.textContent = "Couldn't create the challenge. Try again."; return; }
+      if (error) { console.error(error); go.disabled = false; err.textContent = "Couldn't create the challenge. " + dbErrorText(error); return; }
       const rows = [{ challenge_id: id, user_id: profile.id, status: 'joined' }, ...[...st.sel].map(u => ({ challenge_id: id, user_id: u, status: 'invited' }))];
       const { error: e2 } = await sb.from('challenge_members').insert(rows);
-      if (e2) { await sb.from('challenges').delete().eq('id', id); go.disabled = false; err.textContent = "Couldn't invite your friends. Try again."; return; }
+      if (e2) { console.error(e2); await sb.from('challenges').delete().eq('id', id); go.disabled = false; err.textContent = "Couldn't invite your friends. " + dbErrorText(e2); return; }
       closeSheet();
       toast(`Challenge sent to ${[...st.sel].map(u => '<b>@' + esc(unameOf(u)) + '</b>').join(', ')}!`);
       loadChallenges();
