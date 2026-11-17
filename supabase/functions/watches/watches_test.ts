@@ -62,3 +62,12 @@ Deno.test("webhook rejects a wrong key, unknown routes 404", async () => {
   const r3 = await handler(new Request("http://x/functions/v1/watches", { method: "OPTIONS" }));
   assertEquals(r3.status, 200);
 });
+
+Deno.test("garmin push: manually entered activities are imported", () => {
+  const { byUser } = parseGarminPush({ manuallyUpdatedActivities: [
+    { userId: "u9", summaryId: "m1", activityType: "RUNNING", startTimeInSeconds: 1700000000, distanceInMeters: 5000, durationInSeconds: 1800 },
+  ] });
+  assertEquals(byUser["u9"].length, 1);
+  assertEquals(byUser["u9"][0].km, 5);
+  assertEquals(byUser["u9"][0].isRun, true);
+});

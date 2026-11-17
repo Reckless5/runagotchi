@@ -308,10 +308,16 @@ export function extractActivities(result: any): Activity[] {
 
 const isRunType = (t: unknown) => /run/i.test(String(t ?? ""));
 
-// Garmin pushes {activities: [...]} (Activity API summaries) and {deregistrations: [...]}.
+// Garmin pushes {activities: [...]} (Activity API summaries), {manuallyUpdatedActivities: [...]}
+// (activities entered or edited by hand in Garmin Connect) and {deregistrations: [...]}.
 export function parseGarminPush(body: any): { byUser: Record<string, Activity[]>; deregistered: string[] } {
   const byUser: Record<string, Activity[]> = {};
-  for (const a of body?.activities ?? body?.activityDetails?.map((d: any) => d.summary ?? d) ?? []) {
+  const list = [
+    ...(body?.activities ?? []),
+    ...(body?.manuallyUpdatedActivities ?? []),
+    ...(body?.activityDetails?.map((d: any) => d.summary ?? d) ?? []),
+  ];
+  for (const a of list) {
     if (!a?.userId) continue;
     const act: Activity = {
       externalId: String(a.summaryId ?? a.activityId ?? `${a.startTimeInSeconds}`),
