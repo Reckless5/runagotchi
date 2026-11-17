@@ -37,6 +37,7 @@ let friends = { loaded: false, loading: false, error: false, rows: [], profiles:
 let challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
 let watches = { loaded: false, enabled: {}, links: {}, setup: true };
 let buddies = { loaded: false, mine: [], week: [] }, buddyPairs = new Set();
+let messages = {}; // user id -> their latest chat bubble
 const watchReturn = (() => { const q = new URLSearchParams(location.search); return q.get('watch') ? { provider: q.get('watch'), status: q.get('status'), reason: q.get('reason') } : null; })();
 if (watchReturn) history.replaceState(null, '', location.pathname);
 const now = () => Date.now() + devOffset;
@@ -309,7 +310,7 @@ async function onSession(uid) {
   friends = { loaded: false, loading: false, error: false, rows: [], profiles: {}, pets: {} };
   challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
   watches = { loaded: false, enabled: {}, links: {}, setup: true };
-  buddies = { loaded: false, mine: [], week: [] }; buddyPairs = new Set();
+  buddies = { loaded: false, mine: [], week: [] }; buddyPairs = new Set(); messages = {};
   profile = null; S = null; devOffset = 0;
   if (!uid) {
     if (isGuest()) return startLocal();
@@ -342,6 +343,7 @@ async function loadAccount() {
   loadChallenges();
   loadWatches();
   loadBuddies();
+  loadMessages();
   if (watchReturn) showWatchReturn();
 }
 // A pet made before logging in moves into the account the first time.
@@ -504,7 +506,7 @@ function header() {
     ${mode === 'cloud' ? `<div class="tabs four"><button data-tab="pet" class="${tab === 'pet' ? 'on' : ''}">My pet</button><button data-tab="run" class="${tab === 'run' ? 'on' : ''}">Run</button><button data-tab="challenge" class="${tab === 'challenge' ? 'on' : ''}">Challenge${invites ? `<span class="pill">${invites}</span>` : ''}</button><button data-tab="friends" class="${tab === 'friends' ? 'on' : ''}">Friends${incoming ? `<span class="pill">${incoming}</span>` : ''}</button></div>` : ''}`;
 }
 function bindHeader() {
-  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0, 0); if (tab !== 'pet') loadFriends(); if (tab === 'challenge') loadChallenges(); if (tab === 'run' || tab === 'friends') loadBuddies(); });
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0, 0); if (tab !== 'pet') loadFriends(); if (tab === 'challenge') loadChallenges(); if (tab === 'run' || tab === 'friends') loadBuddies(); if (tab === 'run') loadMessages(); });
 }
 function statusLine(sim, p) {
   const n = `<b>${esc(p.name)}</b>`;
@@ -773,7 +775,7 @@ function runners() {
   list.forEach(x => { x.mood = moodOf(x.sim); x.strength = strengthOf(x.sim, x.level); });
   return list.sort((a, b) => b.strength - a.strength || b.level - a.level || a.pet.name.localeCompare(b.pet.name));
 }
-const runSignature = () => runners().map(x => x.key + ':' + x.mood + ':' + x.strength).join('|') + (friends.loaded ? '' : '…') + [...buddyPairs].sort().join(',');
+const runSignature = () => runners().map(x => x.key + ':' + x.mood + ':' + x.strength).join('|') + (friends.loaded ? '' : '…') + [...buddyPairs].sort().join(',') + JSON.stringify(messages);
 
 const svgUri = s => `url('data:image/svg+xml,${encodeURIComponent(s)}')`;
 function sceneLayers(night) {
@@ -854,8 +856,15 @@ function renderRun() {
   const linkHtml = list.map((x, i) => {
     if (i === 0 || group[i] !== group[i - 1] || !areBuddies(idOf(x), idOf(list[i - 1]))) return '';
     const a = pos(i), b = pos(i - 1), la = LANES[laneIdx[i] % 3], lb = LANES[laneIdx[i - 1] % 3];
-    const y = Math.round(Math.min(la.b, lb.b) + base * 0.14); // at the feet, like holding hands
+    const y = Math.max(la.b, lb.b) + 22; // just above both name tags
     return `<div class="blink" style="left:${a}%;width:${b - a}%;bottom:${y}px"><span>🤝</span></div>`;
+  }).join('');
+  // Chat bubbles above the pets; neighbours alternate heights so they overlap less.
+  const bubbleHtml = list.map((x, i) => {
+    const m = messages[idOf(x)]; if (!m) return '';
+    // Above the back row, so a bubble never covers a pet running behind.
+    const y = LANES[1].b + Math.round(base * LANES[1].s * 0.82);
+    return `<div class="bubble ${x.me ? 'me' : ''}" style="left:${pos(i)}%;bottom:${y}px" title="${esc(fmtAgo(Date.parse(m.created_at), Date.now()))}"><span>${esc(m.body)}</span></div>`;
   }).join('');
   // Name tags live on their own layer so no pet ever covers them.
   const tagHtml = list.map((x, i) => `<div class="tag ${x.me ? 'me' : ''}" style="left:${pos(i)}%;bottom:${LANES[laneIdx[i] % 3].b - 14}px">${x.me ? '<b>You</b> · ' : ''}${esc(x.pet.name)}</div>`).join('');
@@ -865,7 +874,7 @@ function renderRun() {
     return `
     <li class="${x.me ? 'me' : ''}">
       <span class="rank">${i + 1}</span>
-      <span class="who"><b>${esc(x.pet.name)}</b><span class="small muted">${x.me ? 'you' : '@' + esc(x.user)} · LV ${x.level}</span>${bud.length ? `<span class="small bud-note">🤝 with ${bud.map(esc).join(', ')}</span>` : ''}</span>
+      <span class="who"><b>${esc(x.pet.name)}</b><span class="small muted">${x.me ? 'you' : '@' + esc(x.user)} · LV ${x.level}</span>${bud.length ? `<span class="small bud-note">🤝 with ${bud.map(esc).join(', ')}</span>` : ''}${messages[idOf(x)] ? `<span class="small msg-note">💬 ${esc(messages[idOf(x)].body)} <span class="muted">· ${fmtAgo(Date.parse(messages[idOf(x)].created_at), Date.now())}</span></span>` : ''}</span>
       <span class="str"><span class="sbar"><i style="width:${Math.max(0, x.strength)}%"></i></span><span class="small ${x.strength < 15 ? 'bad' : 'muted'}">${label(x)}</span></span>
     </li>`;
   }).join('');
@@ -874,15 +883,20 @@ function renderRun() {
       ${sky.orb}
       ${sceneLayers(sky.night)}
       <button class="scene-title" id="renamePack2" aria-label="Rename your running group">${esc(packName())} <span>✏️</span></button>
-      ${n ? runnerHtml + linkHtml + tagHtml : ''}
+      ${n ? runnerHtml + linkHtml + tagHtml + bubbleHtml : ''}
       ${n <= 1 ? `<div class="scene-note">${!friends.loaded && !friends.error ? 'Loading friends…' : 'Add friends to run together!'}</div>` : ''}
     </div>
+    ${n ? `<form class="say" id="sayForm"><input id="say" class="text" maxlength="80" autocomplete="off" placeholder="Say something to your pack…"><button class="btn primary" id="saySend">Send</button></form>
+      ${messages[profile.id] ? `<div class="small muted say-mine">Your bubble: “${esc(messages[profile.id].body)}” · ${fmtAgo(Date.parse(messages[profile.id].created_at), Date.now())} · <button class="linkbtn" id="sayClear">Remove</button></div>` : ''}` : ''}
     <p class="small muted center" style="margin:8px 0 14px">Strongest pets lead the pack, the weakest trail behind. Friends who ran together this week run side by side 🤝</p>
     ${n ? `<section class="card"><h2><span class="packname">${esc(packName())} <button class="linkbtn rename" id="renamePack" aria-label="Rename your running group">✏️</button></span><button class="btn small ghost" id="rrefresh">${friends.loading ? 'Loading…' : 'Refresh'}</button></h2><ol class="pack">${rows}</ol>
       ${n === 1 ? `<div class="empty">Only you so far. <button class="linkbtn" id="goFriends">Add friends</button></div>` : ''}</section>` : ''}`;
   bindHeader();
   if ($('#rrefresh')) $('#rrefresh').onclick = loadFriends;
   ['#renamePack', '#renamePack2'].forEach(sel => { if ($(sel)) $(sel).onclick = openRenamePack; });
+  stackBubbles();
+  if ($('#sayForm')) $('#sayForm').onsubmit = e => { e.preventDefault(); sendMessage($('#say').value); };
+  if ($('#sayClear')) $('#sayClear').onclick = clearMessage;
   if ($('#goFriends')) $('#goFriends').onclick = () => { tab = 'friends'; render(); };
 }
 
@@ -1400,6 +1414,58 @@ function bindDebug() {
   });
 }
 
+
+/* ============ chat bubbles ============ */
+// Bubbles that would overlap get stacked upwards, left to right.
+function stackBubbles() {
+  const scene = document.querySelector('.scene'); if (!scene) return;
+  // offset* ignores CSS transforms, so the pop-in animation doesn't skew the sizes.
+  const box = el => { const w = el.offsetWidth, h = el.offsetHeight, l = el.offsetLeft - w / 2; return { left: l, right: l + w, top: el.offsetTop, bottom: el.offsetTop + h }; };
+  const minTop = 44; // keep clear of the group name
+  const placed = [];
+  [...scene.querySelectorAll('.bubble')].map(el => ({ el, r: box(el) })).sort((a, b) => a.r.left - b.r.left).forEach(({ el, r }) => {
+    let lift = 0, moved = true;
+    while (moved) {
+      moved = false;
+      for (const p of placed) {
+        if (r.left < p.right + 4 && r.right > p.left - 4 && r.top - lift < p.bottom + 6 && r.bottom - lift > p.top - 6) { lift = r.bottom - p.top + 8; moved = true; }
+      }
+    }
+    lift = Math.min(lift, Math.max(0, r.top - minTop)); // never above the scene's top
+    if (lift) el.style.bottom = (parseFloat(el.style.bottom) + lift) + 'px';
+    placed.push({ left: r.left, right: r.right, top: r.top - lift, bottom: r.bottom - lift });
+  });
+}
+async function loadMessages() {
+  if (mode !== 'cloud' || !profile) return;
+  try {
+    const { data, error } = await sb.from('pack_messages').select('user_id,body,created_at');
+    if (error) throw error;
+    const next = Object.fromEntries(data.map(m => [m.user_id, m]));
+    if (JSON.stringify(next) === JSON.stringify(messages)) return;
+    messages = next;
+  } catch (e) { console.error(e); return; }
+  if (screen === 'app' && tab === 'run' && !draft && !sheetOpen() && !isTyping()) render();
+}
+async function sendMessage(raw) {
+  const body = String(raw || '').trim().replace(/\s+/g, ' ');
+  if (!body) return;
+  if (body.length > 80) return toast('Keep it to 80 characters.');
+  const btn = $('#saySend'); if (btn) btn.disabled = true;
+  const row = { user_id: profile.id, body, created_at: new Date().toISOString() };
+  const { error } = await sb.from('pack_messages').upsert(row);
+  if (btn) btn.disabled = false;
+  if (error) { console.error(error); return toast(/pack_messages/.test(error.message || '') ? 'Almost: run supabase/008_pack_chat.sql in Supabase first.' : "Couldn't send. Try again."); }
+  messages = { ...messages, [profile.id]: row };
+  if (document.activeElement) document.activeElement.blur();
+  render();
+}
+async function clearMessage() {
+  const { error } = await sb.from('pack_messages').delete().eq('user_id', profile.id);
+  if (error) return toast("Couldn't remove it. Try again.");
+  const m = { ...messages }; delete m[profile.id]; messages = m; render();
+}
+
 /* ============ add run ============ */
 function openAddRun() {
   openSheet(`<h3>Log a run</h3>
@@ -1461,6 +1527,7 @@ setInterval(() => {
   if (open) document.querySelector('details.settings').open = true;
 }, 60000);
 setInterval(() => { if (mode === 'cloud' && screen === 'app') { loadFriends(); loadChallenges(); } }, 5 * 60000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode === 'cloud' && screen === 'app') { refreshRuns(); loadFriends(); loadChallenges(); loadWatches(); loadBuddies(); } });
+setInterval(() => { if (mode === 'cloud' && screen === 'app' && tab === 'run' && document.visibilityState === 'visible') loadMessages(); }, 30000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode === 'cloud' && screen === 'app') { refreshRuns(); loadFriends(); loadChallenges(); loadWatches(); loadBuddies(); loadMessages(); } });
 
 boot();

@@ -284,7 +284,7 @@ details.past .card{margin:12px 0 0;border:0;padding:0;background:transparent}
 /* running together */
 .runs .with{display:block;color:#b4531f;font-size:12px;margin-top:2px}
 .x.bud{font-size:16px}
-.blink{position:absolute;z-index:9;height:0;border-top:3px dashed rgba(255,107,53,.85);transform:translateY(50%);transition:left 1.2s ease,width 1.2s ease,bottom 1.2s ease;pointer-events:none}
+.blink{position:absolute;z-index:38;height:0;border-top:3px dashed rgba(255,107,53,.85);transform:translateY(50%);transition:left 1.2s ease,width 1.2s ease,bottom 1.2s ease;pointer-events:none}
 .blink span{position:absolute;left:50%;top:-13px;transform:translateX(-50%);width:22px;height:22px;border-radius:50%;background:#fff;display:grid;place-items:center;font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.2);animation:budpulse 1.6s ease-in-out infinite}
 @keyframes budpulse{0%,100%{transform:translateX(-50%) scale(1)}50%{transform:translateX(-50%) scale(1.15)}}
 .bud-note{color:#b4531f}
@@ -304,6 +304,18 @@ section.card.dbg{border:2px dashed #c9b28a;background:#fffdf6}
 .dbg-row:first-of-type{border-top:0}
 .dbg-who{display:flex;flex-direction:column;margin-bottom:6px}
 .chip.small{padding:5px 10px;font-size:13px;border-radius:10px}
+
+/* chat bubbles */
+.bubble{position:absolute;z-index:50;transform:translateX(-50%);max-width:124px;background:#fff;color:var(--ink);font-size:11.5px;line-height:1.25;font-weight:500;padding:5px 9px;border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.15);transition:left 1.2s ease,bottom 1.2s ease;animation:pop .3s ease-out}
+.bubble span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;width:max-content;max-width:106px}
+.bubble::after{content:"";position:absolute;left:50%;bottom:-5px;width:10px;height:10px;background:inherit;transform:translateX(-50%) rotate(45deg);border-radius:2px}
+.bubble.me{background:#fff1ea}
+@keyframes pop{from{transform:translateX(-50%) scale(.6);opacity:0}}
+.say{display:flex;gap:8px;margin:12px 0 4px}
+.say .text{flex:1;font-size:15px;padding:10px 12px}
+.say .btn{padding:10px 16px}
+.say-mine{margin:2px 2px 0}
+.msg-note{color:#5d5546;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* pet animation */
 .pet-anim{transform-box:fill-box;transform-origin:50% 100%}
