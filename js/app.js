@@ -225,7 +225,7 @@ function petSVG(p, mood, stage, id, run = false) {
     : `<ellipse class="fl" cx="78" cy="175" rx="14" ry="7" fill="${dark}"/><ellipse class="fr" cx="122" cy="175" rx="14" ry="7" fill="${dark}"/>`;
   return `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <defs><clipPath id="${clip}"><path d="${sh.d}"/></clipPath></defs>
-    ${dead ? '' : '<ellipse cx="100" cy="182" rx="56" ry="6" fill="rgba(0,0,0,.13)"/>'}
+    ${dead ? '' : '<ellipse class="psh" cx="100" cy="182" rx="56" ry="6" fill="rgba(0,0,0,.13)"/>'}
     <g transform="translate(100 180) scale(${scale}) translate(-100 -180)">
       <g class="pet-anim ${running ? 'm-run' : cond ? 'm-rest' : 'm-' + mood}">
         ${feet}
@@ -636,7 +636,7 @@ function renderPet() {
     <div class="device">
       <div class="screen ${mood === 'dead' ? 'dead' : ''}" id="screen">
         <div class="lv">LV ${lvl} · ${stage.toUpperCase()}</div><div class="clock">${devOffset ? '⏩ ' : ''}${clock}</div>
-        ${gardenRoom(tNowHour(), petSVG(p, mood, stage, 'main'))}
+        ${gardenRoom(tNowHour(), petSVG(p, mood, stage, 'main'), mood, p.condition || '', stage)}
         <div class="glass"></div>
       </div>
       ${bar(sim.f)}
@@ -1780,6 +1780,8 @@ function bindTilt() {
   st.onpointermove = e => { if (e.pointerType !== 'mouse') return; const r = st.getBoundingClientRect();
     tilt.pointer = { x: ((e.clientX - r.left) / r.width) * 2 - 1, y: ((e.clientY - r.top) / r.height) * 2 - 1 }; };
   st.onpointerleave = () => { tilt.pointer = null; };
+  const sc = $('#screen');
+  if (sc) sc.onclick = () => petTapped();
   if (!tilt.running) { tilt.running = true; requestAnimationFrame(tiltFrame); }
 }
 function tiltFrame(t) {
@@ -1793,7 +1795,8 @@ function tiltFrame(t) {
     else { const s = t / 1000; tx = Math.sin(s * 0.55) * 0.55 + Math.sin(s * 0.23) * 0.2; ty = Math.sin(s * 0.41 + 1.3) * 0.35; }
     tilt.x += (tx - tilt.x) * 0.08; tilt.y += (ty - tilt.y) * 0.08;
     st.style.setProperty('--tx', tilt.x.toFixed(3)); st.style.setProperty('--ty', tilt.y.toFixed(3));
-  }
+    roamStep(st, t);
+  } else roam.last = 0;
   requestAnimationFrame(tiltFrame);
 }
 
@@ -1824,7 +1827,7 @@ const GARDEN = {
   tuft: (c1, c2) => `<svg viewBox="0 0 40 30" preserveAspectRatio="xMidYMax meet" aria-hidden="true"><g fill="#2f9a3e"><path d="M2 30 Q8 12 12 8 Q14 20 16 30Z"/><path d="M12 30 Q20 6 28 2 Q26 18 28 30Z"/><path d="M24 30 Q30 16 36 14 Q34 24 38 30Z"/></g>
       <circle cx="10" cy="14" r="4" fill="${c1}"/><circle cx="10" cy="14" r="1.6" fill="${c2}"/></svg>`,
 };
-function gardenRoom(hour, pet) {
+function gardenRoom(hour, pet, mood = '', cond = '', stage = 'grown') {
   const tod = hour >= 21 || hour < 6 ? 'night' : hour >= 18 ? 'dusk' : hour < 8 ? 'dawn' : 'day';
   // Every object gets its own 3D layer with the same camera, and the layers are stacked far → near.
   // That way the drawing order never depends on the browser's 3D sorting (Safari gets it wrong).
@@ -1833,7 +1836,7 @@ function gardenRoom(hour, pet) {
   const b = (cls, x, z, w, html) => L(`<div class="bb ${cls}" style="--x:${x}%;--z:${z}px;--w:${w}%">${html}</div>`);
   // a = something in the air: the picture hangs at the top of a column of height h (% of the screen)
   const a = (cls, x, z, w, h, html) => L(`<div class="bb air ${cls}" style="--x:${x}%;--z:${z}px;--w:${w}%;--h:${h}%">${html}</div>`);
-  return `<div class="room ${tod}" aria-hidden="true">
+  return `<div class="room ${tod}" data-mood="${mood}" data-cond="${cond}" aria-hidden="true">
     ${a('sunbb', 68, -1100, 22, 128, GARDEN.sun)}
     ${a('cloudbb', 30, -1000, 40, 120, GARDEN.cloud)}
     ${a('cloudbb', 88, -800, 30, 95, GARDEN.cloud)}
@@ -1843,8 +1846,88 @@ function gardenRoom(hour, pet) {
     ${b('', 75, -560, 18, GARDEN.palm)}
     ${b('', 92, -230, 34, GARDEN.tree)}
     ${b('', 4, -140, 46, GARDEN.palm)}
-    ${b('petbb', 50, 0, 70, pet)}
-    ${b('', 6, 120, 22, GARDEN.tuft('#ff7eb6', '#ffe36b'))}
-    ${b('', 95, 150, 20, GARDEN.tuft('#fff', '#ffd23f'))}
+    ${b('petbb', 50, 0, 70, pet + `<div class="emote" style="top:${{ baby: 30, kid: 21, grown: 12 }[stage] || 12}%"></div>`)}
+    ${b('', 4, 70, 22, GARDEN.tuft('#ff7eb6', '#ffe36b'))}
+    ${b('', 97, 90, 20, GARDEN.tuft('#fff', '#ffd23f'))}
   </div>`;
+}
+
+
+/* ============ the pet's little life in the garden ============
+   World units are px. x = sideways (0 = middle of the garden), z = depth (negative = further away).
+   The camera is locked on the pet: the whole world is shifted by -pet (see .cam in index.html). */
+const roam = { x: 0, z: 0, y: 0, flip: 1, state: 'idle', act: null, until: 0, tx: 0, tz: 0, emote: '', walking: false, last: 0, prev: '' };
+const ROAM_SPOTS = W => ({            // where things are, measured from the layout in gardenRoom()
+  pond:  { x: 0.15 * W, z: -165, face: 0.36 * W },
+  tree:  { x: 0.28 * W, z: -205, face: 0.42 * W },
+  palm:  { x: -0.30 * W, z: -110, face: -0.46 * W },
+  home:  { x: 0, z: 0 },
+});
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = list => { let r = Math.random() * list.reduce((n, x) => n + x[0], 0); for (const x of list) { if ((r -= x[0]) <= 0) return x[1]; } return list[0][1]; };
+function roamNext(now, W, room) {
+  const mood = room.dataset.mood, cond = room.dataset.cond, night = room.classList.contains('night');
+  const sp = ROAM_SPOTS(W);
+  const go = (spot, act) => { roam.tx = spot.x; roam.tz = spot.z; roam.state = 'walk'; roam.act = { ...act, face: spot.face }; roam.until = now + 30; };
+  const doNow = act => { roam.state = act.name; roam.act = act; roam.until = now + act.dur; };
+  if (night || cond === 'sick') {
+    // sleepy: wander back to the middle, then nap for a long time
+    if (Math.hypot(roam.x, roam.z) > 30) return go(sp.home, { name: 'sleep', emote: '💤', dur: 20 });
+    return doNow({ name: 'sleep', emote: '💤', dur: rnd(15, 30) });
+  }
+  const tired = mood === 'starving' || mood === 'hungry' || cond === 'injured';
+  const choice = pick([
+    [3, 'wander'], [2, 'pond'], [2, 'tree'], [1, 'palm'], [2, 'idle'], [tired ? 0.3 : 1.5, 'hop'], [1, 'look'], [tired ? 2 : 0.5, 'sit'],
+  ]);
+  if (choice === 'wander') { const n = { x: rnd(-0.38, 0.38) * W, z: rnd(-170, 10) }; return go(n, { name: 'idle', emote: '', dur: rnd(1.5, 3) }); }
+  if (choice === 'pond') return go(sp.pond, { name: 'drink', emote: '💧', dur: rnd(3, 5) });
+  if (choice === 'tree') return go(sp.tree, { name: 'eat', emote: mood === 'starving' || mood === 'hungry' ? '🍎❓' : '🍎', dur: rnd(3, 5) });
+  if (choice === 'palm') return go(sp.palm, { name: 'sniff', emote: '🌴', dur: rnd(2.5, 4) });
+  if (choice === 'hop') return doNow({ name: 'hop', emote: '♪', dur: rnd(1.6, 2.6) });
+  if (choice === 'look') return doNow({ name: 'look', emote: '❗', dur: 2.2 });
+  if (choice === 'sit') return doNow({ name: 'sit', emote: tired ? (cond === 'injured' ? '🩹' : '💭') : '', dur: rnd(4, 8) });
+  return doNow({ name: 'idle', emote: '', dur: rnd(2, 4) });
+}
+function petTapped() {
+  const room = document.querySelector('.room'); if (!room || room.dataset.mood === 'dead') return;
+  const now = performance.now() / 1000;
+  roam.state = room.classList.contains('night') || room.dataset.cond === 'sick' ? 'look' : 'hop';
+  roam.act = { name: roam.state, emote: roam.state === 'hop' ? '❤️' : '❗', dur: 1.8 }; roam.until = now + 1.8;
+}
+function roamStep(st, t) {
+  const room = st.querySelector('.room'); if (!room) return;
+  const now = t / 1000, dt = roam.last ? Math.min(0.1, now - roam.last) : 0; roam.last = now;
+  const W = room.clientWidth || 280;
+  let emote;
+  if (room.dataset.mood === 'dead' || reducedMotion()) {
+    roam.x += (0 - roam.x) * 0.1; roam.z += (0 - roam.z) * 0.1; roam.y = 0; roam.state = 'idle'; roam.act = null; emote = '';
+  } else {
+    if (now > roam.until) roamNext(now, W, room);
+    emote = roam.act ? roam.act.emote : '';
+    if (roam.state === 'walk') {
+      const dx = roam.tx - roam.x, dz = roam.tz - roam.z, d = Math.hypot(dx, dz);
+      const speed = room.dataset.cond === 'injured' ? 16 : room.dataset.mood === 'starving' ? 22 : 42;
+      if (d < 2) { roam.state = roam.act.name; roam.until = now + roam.act.dur; if (roam.act.face != null) roam.flip = roam.act.face < roam.x ? -1 : 1; }
+      else {
+        const k = Math.min(1, speed * dt / d); roam.x += dx * k; roam.z += dz * k;
+        if (Math.abs(dx) > 1) roam.flip = dx < 0 ? -1 : 1;
+      }
+      emote = '';
+    }
+    const s = roam.state;
+    roam.y = s === 'walk' ? -Math.abs(Math.sin(now * (room.dataset.cond === 'injured' ? 5 : 9))) * (room.dataset.cond === 'injured' ? 1.5 : 3)
+      : s === 'hop' ? -Math.abs(Math.sin(now * 7)) * 14
+      : s === 'drink' || s === 'eat' ? (Math.sin(now * 6) > .3 ? 3 : 0)
+      : 0;
+    if (s === 'look') roam.flip = Math.sin(now * 3) > 0 ? 1 : -1;
+  }
+  st.style.setProperty('--px', roam.x.toFixed(1)); st.style.setProperty('--pz', roam.z.toFixed(1));
+  st.style.setProperty('--py', roam.y.toFixed(1)); st.style.setProperty('--flip', roam.flip);
+  const cls = roam.state === 'walk' ? 'walking' : roam.state === 'sit' || roam.state === 'sleep' ? 'resting' : '';
+  const sig = cls + '|' + emote;
+  const bb = room.querySelector('.petbb');
+  if (bb && bb.dataset.sig !== sig) {   // only touch the DOM when something changes
+    bb.dataset.sig = sig; bb.classList.toggle('walking', cls === 'walking'); bb.classList.toggle('resting', cls === 'resting');
+    const e = bb.querySelector('.emote'); if (e) { e.textContent = emote; e.classList.toggle('on', !!emote); }
+  }
 }

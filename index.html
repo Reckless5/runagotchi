@@ -71,7 +71,7 @@ header.top{display:flex;align-items:center;justify-content:space-between;margin-
 .room{position:absolute;inset:0;overflow:hidden}
 .room .lyr{position:absolute;inset:0;perspective:420px;perspective-origin:50% 38%;pointer-events:none}
 .room .cam{position:absolute;inset:0;transform-style:preserve-3d;transform-origin:50% 80% 0;
-  transform:rotateX(calc(var(--ty) * -6deg)) rotateY(calc(var(--tx) * 11deg))}
+  transform:rotateX(calc(var(--ty) * -6deg)) rotateY(calc(var(--tx) * 11deg)) translate3d(calc(var(--px, 0) * -1px), 0, calc(var(--pz, 0) * -1px))}
 .room .cam > *{position:absolute;pointer-events:none}
 .room svg{display:block;width:100%;height:100%}
 .room{background:linear-gradient(180deg,var(--sk1) 0%,var(--sk2) 46%,#8fcf74 46%,#7cc862 60%,#77c75a 100%)}
@@ -79,7 +79,7 @@ header.top{display:flex;align-items:center;justify-content:space-between;margin-
   linear-gradient(180deg,var(--sk1) 0%,var(--sk2) 46%,#5f9a52 46%,#58934c 100%)}
 .room .floor{left:-250%;width:600%;top:80%;height:2600px;transform-origin:50% 0;transform:translateZ(-2200px) rotateX(90deg);
   background:repeating-linear-gradient(90deg,#7dd05f 0 26px,#72c656 26px 52px)}
-.room .floor .pond{position:absolute;left:52.5%;top:1980px;width:7%;height:110px;border-radius:50%;
+.room .floor .pond{position:absolute;left:54%;top:1980px;width:4%;height:110px;border-radius:50%;
   background:radial-gradient(60% 60% at 45% 40%,#bfeaff,#58b8f0 70%,#3a9ad8);box-shadow:0 0 0 6px #d9cba4, 0 0 0 9px #bfae84}
 .room .floor .path{position:absolute;left:49.2%;top:1700px;width:1.6%;height:520px;border-radius:30px;background:#e3d3a3}
 /* billboards: bottom edge sits on the ground line (80%), centred on --x */
@@ -88,7 +88,15 @@ header.top{display:flex;align-items:center;justify-content:space-between;margin-
 .room .bb svg{height:auto;max-height:100%}
 .room .bb.hills{height:150%}
 .room .bb.hills svg{height:30%;width:100%}
-.room .bb.petbb{height:76%}
+.room .bb.petbb{height:76%;transform:translate3d(calc(var(--px, 0) * 1px), calc(var(--py, 0) * 1px), calc(var(--pz, 0) * 1px))}
+.room .petbb svg{transform:scaleX(var(--flip, 1));transition:transform .25s}
+.room .petbb .psh{transform:translateY(calc(var(--py, 0) * -1px))}
+.room .petbb.resting svg{transform:scaleX(var(--flip, 1)) scaleY(.9);transform-origin:50% 90%}
+.room .petbb .emote{position:absolute;left:50%;transform:translateX(-50%) scale(0);font-size:20px;line-height:1;background:#fff;border-radius:12px;padding:3px 6px;
+  box-shadow:0 2px 6px rgba(0,0,0,.15);transition:transform .2s;white-space:nowrap}
+.room .petbb .emote.on{transform:translateX(-50%) scale(1)}
+.room .petbb.walking .fl{animation:footL .42s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+.room .petbb.walking .fr{animation:footR .42s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
 .room .bb.petbb svg{height:100%;margin-bottom:-9%}
 .room{--sk1:#7fcaff;--sk2:#dff5ff}
 .room .sun{fill:#fff3a6}
