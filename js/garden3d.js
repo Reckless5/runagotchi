@@ -81,7 +81,9 @@ export function createGarden() {
       const key = JSON.stringify([spec.pet, spec.mood, spec.stage]);
       if (key !== petKey) {
         if (pet) { scene.remove(pet); pet.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
+        g.petChanged = !!petKey;   // a new look (sick, injured, hungry, grown…): the app brings the pet back into view
         pet = buildPet(spec.pet, spec.mood, spec.stage); scene.add(pet); petKey = key;
+        heading = 0; view.x = 0; view.z = 0;
         const sc = { baby: 0.72, kid: 0.86, grown: 1 }[spec.stage] || 1; petShadow.scale.set(sc, sc, 1);
       }
       return true;

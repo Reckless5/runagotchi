@@ -20,11 +20,11 @@ function buildWorld(scene) {
   const gt = TEX.grass().clone(); gt.needsUpdate = true; gt.repeat.set(25, 6.5); A.field = gt;
   const field = new THREE.Mesh(new THREE.PlaneGeometry(30, 8), lam({ map: gt })); field.rotation.x = -Math.PI / 2; field.position.set(0, 0.002, 1.0); scene.add(field);
   // scenery that streams past (wraps around)
-  const add = (o, x, z, ry = rr(0, 6)) => { o.position.set(x, A.hAt(x, z), z); o.rotation.y = ry; scene.add(o); A.movers.push(o); return o; };
+  const add = (o, x, z, ry = rr(0, 6)) => { o.position.set(x, 0, z); o.rotation.y = ry; scene.add(o); A.movers.push(o); return o; };
   const petals = ['#ff7eb6', '#ffffff', '#ffd23f', '#8fd0ff'];
-  for (let i = 0; i < 9; i++) add([() => palm(rr(1.5, 2.1)), () => tree(rr(0.9, 1.25), rand2()), () => pine(rr(1.3, 1.9))][i % 3](), -SPAN / 2 + i * SPAN / 9 + rr(-0.6, 0.6), rr(-3.2, -1.4));
-  for (let i = 0; i < 7; i++) add([() => pine(rr(1.8, 2.6)), () => palm(rr(2, 2.6)), () => tree(rr(1.3, 1.6), false)][i % 3](), -SPAN / 2 + i * SPAN / 7 + rr(-1, 1), rr(-7, -4.5));
-  for (let i = 0; i < 6; i++) { const r = rock(rr(0.4, 0.7)); add(r, -SPAN / 2 + i * SPAN / 6 + rr(0, 2), rr(-1.2, -0.5)); }
+  // everything stands on the flat meadow (z > −3); the hills behind stay bare
+  for (let i = 0; i < 9; i++) add([() => palm(rr(1.5, 2.1)), () => tree(rr(0.9, 1.25), rand2()), () => pine(rr(1.3, 1.9))][i % 3](), -SPAN / 2 + i * SPAN / 9 + rr(-0.6, 0.6), rr(-2.6, -1.4));
+  for (let i = 0; i < 6; i++) { const r = rock(rr(0.4, 0.7)); add(r, -SPAN / 2 + i * SPAN / 6 + rr(0, 2), rr(-1.2, -0.5)); r.position.y = 0.04; }
   for (let i = 0; i < 16; i++) { const f = flower(petals[i % 4], rr(0.8, 1.1)); add(f, -SPAN / 2 + i * SPAN / 16 + rr(0, 1), i % 2 ? rr(2.8, 3.4) : rr(-0.6, -0.2), 0); }
   for (let i = 0; i < 14; i++) add(grassTuft(rr(0.8, 1.3)), -SPAN / 2 + i * SPAN / 14 + rr(0, 1), i % 2 ? rr(2.75, 3.6) : rr(-0.7, -0.15));
   // far mountains (they barely move)
@@ -175,7 +175,7 @@ export function createCrew() {
       const moving = !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
       const dx = moving ? SPEED * (c.lastT ? Math.min(0.1, now - c.lastT) : 0) : 0; c.lastT = now;
       // stream the world to the left
-      A.movers.forEach(o => { o.position.x -= dx; if (o.position.x < -SPAN / 2 - 2) o.position.x += SPAN + 4; o.position.y = A.hAt(o.position.x, o.position.z); });   // follow the hills
+      A.movers.forEach(o => { o.position.x -= dx; if (o.position.x < -SPAN / 2 - 2) o.position.x += SPAN + 4; });
       const off = (now * SPEED) % 1000;
       A.field.offset.x = (off / 1.2) % 1;
       A.far.position.x = -((now * 0.15) % 8);

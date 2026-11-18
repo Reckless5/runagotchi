@@ -708,6 +708,7 @@ function renderPet() {
     const hour = tNowHour(), tod = hour >= 21 || hour < 6 ? 'night' : hour >= 18 ? 'dusk' : hour < 8 ? 'dawn' : 'day';
     garden.info = { mood, cond: p.condition || '', night: tod === 'night' };
     if (!garden.attach($('#g3d'), { pet: pet3dSpec(p), mood, stage, tod })) render();   // no 3D after all → flat garden
+    if (garden.petChanged) { garden.petChanged = false; petBackHome(); }
   } else garden.detach();
   bindTilt();
   document.querySelectorAll('[data-cond]').forEach(b => b.onclick = () => setCondition(b.dataset.cond || null));
@@ -2020,4 +2021,11 @@ function startCrewLoop() {
     requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
+}
+
+// When the pet's state changes, pop it back to its starting spot, facing you, so the new look is seen.
+function petBackHome() {
+  const now = performance.now() / 1000;
+  roam.x = 0; roam.z = 0; roam.y = 0; roam.heading = 0; roam.tx = 0; roam.tz = 0; roam.last = 0;
+  roam.state = 'idle'; roam.act = { name: 'idle', emote: '', dur: 6 }; roam.until = now + 6;
 }
