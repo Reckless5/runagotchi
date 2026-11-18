@@ -32,6 +32,7 @@ let tab = 'pet';            // pet | friends
 let devOffset = 0;          // time machine (local mode only)
 let draft = null;           // pet being created / edited
 let showAllRuns = false;
+let settingsOpen = false;   // keep the Settings section open across re-renders
 let authMode = 'login';
 let friends = { loaded: false, loading: false, error: false, rows: [], profiles: {}, pets: {} };
 let challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
@@ -375,6 +376,7 @@ async function onSession(uid) {
   watches = { loaded: false, enabled: {}, links: {}, setup: true };
   buddies = { loaded: false, mine: [], week: [] }; buddyPairs = new Set(); messages = {};
   invites = { loaded: false, list: [] };
+  settingsOpen = false;
   profile = null; S = null; devOffset = 0;
   if (!uid) {
     if (isGuest()) return startLocal();
@@ -655,11 +657,11 @@ function renderPet() {
       : `<div class="empty">No runs yet. Log one to feed ${esc(p.name)}.</div>`}
     </section>
 
-    ${mode === 'cloud' ? watchesCard() : ''}
     <section class="card">
-      <details class="settings">
+      <details class="settings" ${settingsOpen ? 'open' : ''}>
         <summary>Settings</summary>
         ${account}
+        ${mode === 'cloud' ? watchesCard() : ''}
         <div class="row" style="margin-top:14px"><button class="btn small" id="editPet">Edit ${esc(p.name)}</button><span class="small muted">Appetite: ${DIFF[p.difficulty].label} (~${goal} km/week)</span></div>
         ${mode === 'local' || isDebug() ? `
         <div class="row" style="margin-top:14px"><span class="small"><b>Time machine</b> <span class="muted">(for testing hunger)</span></span></div>
@@ -673,6 +675,8 @@ function renderPet() {
       </details>
     </section>`;
   bindHeader();
+  const sd = document.querySelector('details.settings');
+  if (sd) sd.addEventListener('toggle', () => { settingsOpen = sd.open; });
   $('#addRun').onclick = openAddRun;
   document.querySelectorAll('[data-cond]').forEach(b => b.onclick = () => setCondition(b.dataset.cond || null));
   document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
@@ -1262,13 +1266,13 @@ function watchesCard() {
     const diag = link && on && id === 'coros' ? `<button class="linkbtn small diag" data-wdiag="${id}">Check connection</button>` : '';
     return `<div class="wrow"><div class="wlogo ${id}">${WATCH_NAMES[id]}</div><div class="wstat small ${link ? '' : 'muted'}"><span>${status}${diag}</span></div><div class="wbtns">${btn}</div></div>`;
   };
-  return `<section class="card">
-    <h2>Your watches</h2>
+  return `<div class="watches">
+    <div class="row" style="margin-top:14px"><span class="small"><b>Your watches</b></span></div>
     ${['garmin', 'coros', 'suunto'].map(row).join('')}
     <p class="small muted" style="margin:10px 0 0">${Object.values(watches.links).length
       ? `New runs from your watch feed your pet automatically after it syncs with the brand's app${watches.links.coros && watches.enabled.coros ? ' (COROS is checked every 30 minutes and when you open the app)' : ''}. Only runs from after connecting count.`
       : 'Connect your watch and your runs feed your pet automatically. Brands marked "coming soon" are waiting for approval.'}</p>
-  </section>`;
+  </div>`;
 }
 function bindWatches() {
   document.querySelectorAll('[data-won]').forEach(b => b.onclick = async () => {
@@ -1333,6 +1337,7 @@ function showWatchReturn() {
     : watchReturn.reason === 'already_linked' ? `That ${name} account is already connected to another Runagotchi account.`
     : `Couldn't connect ${name}. Please try again.`;
   if (watchReturn.status === 'ok' && watchReturn.provider === 'coros') corosAutoAt = 0;
+  settingsOpen = true; // show the watch status right where it was connected
   setTimeout(() => toast(msg, 6000), 300);
 }
 // Runs can arrive from a watch at any time: fetch them again when the app comes back.
