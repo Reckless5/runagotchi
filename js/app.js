@@ -1875,18 +1875,20 @@ function roamNext(now, W, room) {
     if (Math.hypot(roam.x, roam.z) > 30) return go(sp.home, { name: 'sleep', emote: '💤', dur: 20 });
     return doNow({ name: 'sleep', emote: '💤', dur: rnd(15, 30) });
   }
+  // After every trip the pet walks back to its starting spot and hangs out there for a while.
+  if (Math.hypot(roam.x, roam.z) > 4) return go(sp.home, { name: 'idle', emote: '', dur: rnd(10, 18) });
   const tired = mood === 'starving' || mood === 'hungry' || cond === 'injured';
   const choice = pick([
-    [3, 'wander'], [2, 'pond'], [2, 'tree'], [1, 'palm'], [2, 'idle'], [tired ? 0.3 : 1.5, 'hop'], [1, 'look'], [tired ? 2 : 0.5, 'sit'],
+    [1.2, 'wander'], [1, 'pond'], [1, 'tree'], [0.6, 'palm'], [5, 'idle'], [tired ? 0.2 : 0.8, 'hop'], [0.6, 'look'], [tired ? 2 : 0.4, 'sit'],
   ]);
-  if (choice === 'wander') { const n = { x: rnd(-0.38, 0.38) * W, z: rnd(-170, 10) }; return go(n, { name: 'idle', emote: '', dur: rnd(1.5, 3) }); }
+  if (choice === 'wander') { const n = { x: rnd(-0.38, 0.38) * W, z: rnd(-170, 10) }; return go(n, { name: 'look', emote: '', dur: rnd(2, 3.5) }); }
   if (choice === 'pond') return go(sp.pond, { name: 'drink', emote: '💧', dur: rnd(3, 5) });
   if (choice === 'tree') return go(sp.tree, { name: 'eat', emote: mood === 'starving' || mood === 'hungry' ? '🍎❓' : '🍎', dur: rnd(3, 5) });
   if (choice === 'palm') return go(sp.palm, { name: 'sniff', emote: '🌴', dur: rnd(2.5, 4) });
   if (choice === 'hop') return doNow({ name: 'hop', emote: '♪', dur: rnd(1.6, 2.6) });
   if (choice === 'look') return doNow({ name: 'look', emote: '❗', dur: 2.2 });
-  if (choice === 'sit') return doNow({ name: 'sit', emote: tired ? (cond === 'injured' ? '🩹' : '💭') : '', dur: rnd(4, 8) });
-  return doNow({ name: 'idle', emote: '', dur: rnd(2, 4) });
+  if (choice === 'sit') return doNow({ name: 'sit', emote: tired ? (cond === 'injured' ? '🩹' : '💭') : '', dur: rnd(8, 14) });
+  return doNow({ name: 'idle', emote: '', dur: rnd(10, 18) });
 }
 function petTapped() {
   const room = document.querySelector('.room'); if (!room || room.dataset.mood === 'dead') return;
