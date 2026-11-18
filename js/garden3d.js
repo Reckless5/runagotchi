@@ -82,7 +82,9 @@ export function createGarden() {
       if (key !== petKey) {
         if (pet) { scene.remove(pet); pet.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
         g.petChanged = !!petKey;   // a new look (sick, injured, hungry, grown…): the app brings the pet back into view
+        if (pet && pet.userData.dizzy) scene.remove(pet.userData.dizzy);
         pet = buildPet(spec.pet, spec.mood, spec.stage); scene.add(pet); petKey = key;
+        if (pet.userData.dizzy) { pet.userData.dizzy.parent.remove(pet.userData.dizzy); scene.add(pet.userData.dizzy); pet.userData.dizzy.scale.setScalar(pet.scale.x); }
         heading = 0; view.x = 0; view.z = 0;
         const sc = { baby: 0.72, kid: 0.86, grown: 1 }[spec.stage] || 1; petShadow.scale.set(sc, sc, 1);
       }
@@ -115,6 +117,15 @@ export function createGarden() {
         let d = p.heading - heading; d = Math.atan2(Math.sin(d), Math.cos(d)); heading += d * 0.2;
         pet.rotation.y = heading;
         const ud = pet.userData, s = p.state;
+        if (ud.fainted) {   // lying on its side, centred, with stars circling above its head
+          pet.rotation.set(0, 0, Math.PI / 2 - 0.1);
+          pet.position.set(px + ud.height * 0.42, ud.width * 0.45, pz);
+          if (ud.dizzy) {
+            pet.updateMatrixWorld(true);
+            const head = pet.localToWorld(new THREE.Vector3(0, ud.height / pet.scale.x, 0));
+            ud.dizzy.position.set(head.x - 0.1, head.y + 0.28, head.z); ud.dizzy.rotation.y = now * 2.2;
+          }
+        } else pet.rotation.x = pet.rotation.z = 0;
         const walk = s === 'walk', step = walk ? Math.sin(now * (p.slow ? 5 : 9)) : 0;
         ud.feet[0].position.z = ud.feet[0].userData.z0 + step * 0.09; ud.feet[1].position.z = ud.feet[1].userData.z0 - step * 0.09;
         ud.inner.position.y = walk ? Math.abs(step) * 0.03 : 0;

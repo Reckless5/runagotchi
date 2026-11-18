@@ -72,7 +72,8 @@ function hit(body, from, dir) {
 }
 function frontHit(body, x, y) { return hit(body, new THREE.Vector3(x, y, 5), new THREE.Vector3(0, 0, -1)); }
 function topHit(body) {
-  return hit(body, new THREE.Vector3(0, 5, 0), new THREE.Vector3(0, -1, 0))
+  // a hair off the exact centre: rays straight through a mesh's pole can slip between its tiny triangles
+  return hit(body, new THREE.Vector3(0.012, 5, 0.009), new THREE.Vector3(0, -1, 0))
     || hit(body, new THREE.Vector3(0, 5, 0.4), new THREE.Vector3(0, -1, 0));      // donut: the hole is in the middle
 }
 // put an object on the surface, facing out
@@ -93,10 +94,10 @@ function arc(radius, tube, material, start = 0, len = Math.PI) {
 /* p: { shape, color (hex), pattern, acc, condition }  mood: happy|content|hungry|starving|dead  stage: baby|kid|grown */
 export function buildPet(p, mood = 'content', stage = 'grown') {
   const shape = shapeOf(p.shape), L = LAYOUT[shape];
-  const dead = mood === 'dead';
+  const dead = mood === 'dead', fainted = mood === 'fainting';
   const cond = dead ? null : (p.condition || null);
   const base = p.color || '#ff8a50';
-  const col = dead ? hex('#d6d6d0') : cond === 'sick' ? mix(base, '#b5d68a', 0.45) : hex(base);
+  const col = dead ? hex('#d6d6d0') : fainted ? mix(base, '#dcdcd6', 0.35) : cond === 'sick' ? mix(base, '#b5d68a', 0.45) : hex(base);
   const dark = shade(col, -0.35);
   const root = new THREE.Group(); root.name = 'pet';
   const inner = new THREE.Group(); root.add(inner);           // bobbing / squashing happens on inner
@@ -132,7 +133,7 @@ export function buildPet(p, mood = 'content', stage = 'grown') {
   const eyes = [-1, 1].map(s => frontHit(body, s * L.eyeX, L.eyeY));
   const mouthAt = frontHit(body, 0, L.eyeY - 0.14);
   const face = new THREE.Group(); inner.add(face);
-  const eyeKind = dead ? 'x' : mood === 'happy' && !cond ? 'arc' : cond === 'sick' ? 'sleepy' : 'dot';
+  const eyeKind = dead ? 'x' : fainted ? 'swirl' : mood === 'happy' && !cond ? 'arc' : cond === 'sick' ? 'sleepy' : 'dot';
   eyes.forEach((h, i) => {
     if (!h) return;
     const g = new THREE.Group(); stick(g, h, 0.01); face.add(g);
@@ -140,6 +141,8 @@ export function buildPet(p, mood = 'content', stage = 'grown') {
       for (const r of [0.8, -0.8]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.03, 0.02), ink); b.rotation.z = r; g.add(b); }
     } else if (eyeKind === 'arc') {
       g.add(arc(0.055, 0.016, ink));
+    } else if (eyeKind === 'swirl') {             // dizzy: a spiral of two rings
+      g.add(arc(0.06, 0.012, ink, 0, Math.PI * 2)); g.add(arc(0.03, 0.012, ink, 1, Math.PI * 1.6));
     } else {
       const e = ellipsoid(0.06, 1, eyeKind === 'sleepy' ? 0.45 : 1.25, 0.45, ink, 20); g.add(e);
       if (eyeKind === 'dot') { const s = ellipsoid(0.02, 1, 1, 0.5, mat('#ffffff', { roughness: 0.2 }), 10); s.position.set(0.02, 0.03, 0.03); g.add(s); }
@@ -152,6 +155,7 @@ export function buildPet(p, mood = 'content', stage = 'grown') {
   if (mouthAt) {
     const g = new THREE.Group(); stick(g, mouthAt, 0.008); face.add(g);
     if (dead) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 0.02), ink); g.add(b); }
+    else if (fainted) { const m = arc(0.03, 0.012, ink, 0, Math.PI * 2); m.scale.y = 0.7; g.add(m); }
     else if (mood === 'starving') g.add(ellipsoid(0.04, 1, 1.25, 0.4, mat('#5a2a22'), 16));
     else if (mood === 'hungry' || cond) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, 0.02), ink); g.add(b); }
     else { const m = arc(mood === 'happy' ? 0.06 : 0.045, 0.014, ink, Math.PI); m.position.y = 0.03; g.add(m); }
@@ -192,6 +196,7 @@ export function buildPet(p, mood = 'content', stage = 'grown') {
   // accessory
   const acc = dead ? 'none' : (p.acc || 'none');
   const top = topHit(body);
+  if (top && shape === 'pyramid') top.p.y -= 0.1;   // sit around the tip, not on its point
   if (acc === 'headband') {
     const b = ringAt(L.bandY, 0.045, mat('#e8454d', { roughness: 0.7 })); if (b) inner.add(b);
   } else if (acc === 'cap' && top) {
@@ -217,10 +222,17 @@ export function buildPet(p, mood = 'content', stage = 'grown') {
     g.add(ellipsoid(0.04, 1, 1, 1, mat('#e85a9a'))); g.traverse(o => { o.castShadow = true; }); inner.add(g);
   }
 
+  let dizzy = null;
+  if (fainted && top) {
+    dizzy = new THREE.Group(); dizzy.position.set(0, top.p.y + 0.16, 0);
+    const sm = mat('#ffd23f', { emissive: '#ffb300' });
+    for (let k = 0; k < 3; k++) { const st = new THREE.Mesh(new THREE.IcosahedronGeometry(0.05, 0), sm); const a = k / 3 * Math.PI * 2; st.position.set(Math.cos(a) * 0.24, 0, Math.sin(a) * 0.24); dizzy.add(st); }
+    inner.add(dizzy);
+  }
   const scale = { baby: 0.72, kid: 0.86, grown: 1 }[stage] || 1;
   root.scale.setScalar(scale);
   const box = new THREE.Box3().setFromObject(body);
-  root.userData = { feet, inner, body, height: box.max.y * scale, dead };
+  root.userData = { feet, inner, body, height: box.max.y * scale, dead, fainted, dizzy, width: (box.max.x - box.min.x) * scale };
   return root;
 }
 

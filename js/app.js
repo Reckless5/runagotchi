@@ -1936,7 +1936,7 @@ function gardenInfo() {
   return null;
 }
 function petTapped() {
-  const info = gardenInfo(); if (!info || info.mood === 'dead') return;
+  const info = gardenInfo(); if (!info || info.mood === 'dead' || info.mood === 'fainting') return;
   const now = performance.now() / 1000;
   roam.state = info.night || info.cond === 'sick' ? 'look' : 'hop';
   roam.act = { name: roam.state, emote: roam.state === 'hop' ? '❤️' : '❗', dur: 1.8 }; roam.until = now + 1.8;
@@ -1947,8 +1947,9 @@ function roamStep(st, t) {
   const now = t / 1000, dt = roam.last ? Math.min(0.1, now - roam.last) : 0; roam.last = now;
   const W = info.W;
   let emote;
-  if (info.mood === 'dead' || reducedMotion()) {
-    roam.x += (0 - roam.x) * 0.1; roam.z += (0 - roam.z) * 0.1; roam.y = 0; roam.state = 'idle'; roam.act = null; emote = ''; roam.heading = 0;
+  if (info.mood === 'dead' || info.mood === 'fainting' || reducedMotion()) {
+    roam.x += (0 - roam.x) * 0.1; roam.z += (0 - roam.z) * 0.1; roam.y = 0; roam.state = 'idle'; roam.act = null; roam.heading = 0;
+    emote = info.mood === 'fainting' && !reducedMotion() ? '💫' : '';
   } else {
     if (now > roam.until) roamNext(now, W, info);
     emote = roam.act ? roam.act.emote : '';
