@@ -383,7 +383,7 @@ async function onSession(uid) {
   friends = { loaded: false, loading: false, error: false, rows: [], profiles: {}, pets: {} };
   challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
   watches = { loaded: false, enabled: {}, links: {}, setup: true };
-  buddies = { loaded: false, mine: [], week: [] }; buddyPairs = new Set(); messages = {};
+  buddies = { loaded: false, mine: [], week: [] }; buddyPairs = new Set(); messages = {}; fakes = null;
   invites = { loaded: false, list: [] };
   settingsOpen = false;
   profile = null; S = null; devOffset = 0;
@@ -760,6 +760,7 @@ async function loadFriends() {
     if (pr.error || pe.error) throw (pr.error || pe.error);
     friends = { loaded: true, loading: false, error: false, rows,
       profiles: Object.fromEntries(pr.data.map(p => [p.id, p])), pets: Object.fromEntries(pe.data.map(p => [p.user_id, p])) };
+    addFakeFriends();
   } catch (e) { console.error(e); friends.loading = false; friends.error = true; }
   if (screen === 'app' && !draft && !sheetOpen() && !isTyping()) {
     if (tab === 'run') { const sig = runSignature(); if (sig === lastRunSig) return; }
@@ -840,6 +841,7 @@ function renderFriends() {
   document.querySelectorAll('[data-unf]').forEach(b => b.onclick = () => {
     const r = friends.rows.find(x => x.id === b.dataset.unf); if (!r) return;
     const other = r.requester === me ? r.addressee : r.requester;
+    if (r.fake) return removeFake(other);
     confirmSheet(`Remove @${esc(name(other))}?`, "You'll stop seeing each other's pets. You can add each other again later.", 'Remove', () => removeFriendship(r.id, 'Friend removed.'));
   });
 }
@@ -1224,7 +1226,7 @@ async function cheer(btn) {
   loadChallenges();
 }
 function openNewChallenge() {
-  const accepted = friends.rows.filter(r => r.status === 'accepted').map(r => r.requester === profile.id ? r.addressee : r.requester)
+  const accepted = friends.rows.filter(r => r.status === 'accepted' && !r.fake).map(r => r.requester === profile.id ? r.addressee : r.requester)
     .sort((a, b) => unameOf(a).localeCompare(unameOf(b)));
   if (!accepted.length) {
     return openSheet(`<h3>New challenge</h3><p class="muted">You need at least one friend to challenge. Add friends by their username first.</p>
@@ -1436,13 +1438,13 @@ async function loadBuddies() {
     if (mine.error || week.error) throw (mine.error || week.error);
     const before = [...buddyPairs].sort().join(',') + buddies.mine.length + buddies.week.length;
     buddies = { loaded: true, mine: mine.data, week: week.data };
-    buddyPairs = computeBuddyPairs();
+    buddyPairs = computeBuddyPairs(); addFakeBuddies();
     if (before === [...buddyPairs].sort().join(',') + buddies.mine.length + buddies.week.length) return;
   } catch (e) { console.error(e); return; }
   if (screen === 'app' && !draft && !sheetOpen() && !isTyping()) render();
 }
 const tagsForRun = runId => buddies.mine.filter(r => r.run_id === runId).map(r => r.friend_id);
-const acceptedFriendIds = () => mode === 'cloud' ? friends.rows.filter(r => r.status === 'accepted')
+const acceptedFriendIds = () => mode === 'cloud' ? friends.rows.filter(r => r.status === 'accepted' && !r.fake)
   .map(r => r.requester === profile.id ? r.addressee : r.requester).sort((a, b) => unameOf(a).localeCompare(unameOf(b))) : [];
 const friendChips = sel => acceptedFriendIds().map(id => `<button type="button" class="chip ${sel.has(id) ? 'sel' : ''}" data-buddy="${id}">@${esc(unameOf(id))}</button>`).join('');
 function bindChips(el, sel) {
@@ -1548,9 +1550,10 @@ const DEBUG_STATES = [
 function debugTargets() {
   const list = [];
   if (S && S.pet) list.push({ id: profile.id, label: `You · ${S.pet.name}`, sim: simulate(S, now()), override: S.pet.debugAt != null });
-  for (const id of acceptedFriendIds()) {
+  const ids = friends.rows.filter(r => r.status === 'accepted').map(r => r.requester === profile.id ? r.addressee : r.requester);
+  for (const id of ids) {
     const pr = friends.profiles[id], pet = friends.pets[id];
-    if (pr && pr.is_debug && pet) list.push({ id, label: `@${pr.username} · ${pet.name}`, sim: simulateSnapshot(pet, Date.now()), override: pet.debug_at != null });
+    if (pr && pr.is_debug && pet) list.push({ id, label: `${pr.fake ? '🧪 ' : '@'}${pr.fake ? pet.name : pr.username + ' · ' + pet.name}`, sim: simulateSnapshot(pet, Date.now()), override: pet.debug_at != null });
   }
   return list;
 }
@@ -1564,13 +1567,16 @@ function debugCard() {
     </div>`).join('');
   return `<section class="card dbg"><h2>🐞 Debug <span class="small muted">test account</span></h2>
     ${rows}
+    ${fakeFriendsHTML()}
     <p class="small muted" style="margin:8px 0 0">Sets the pet's food right now (Fainted = empty for 1 h, Starved = empty for 73 h). Hunger keeps running and new runs still feed it. Test friends' pets can be changed too. Reset goes back to the real history. The time machine is in Settings.</p>
   </section>`;
 }
 function bindDebug() {
+  bindFakeFriends();
   document.querySelectorAll('[data-dbg]').forEach(b => b.onclick = async () => {
     const [id, k] = b.dataset.dbg.split('|');
     const st = DEBUG_STATES.find(x => x.k === k);
+    if (id.startsWith('fake-')) return setFakeState(id, st);
     b.disabled = true;
     const { error } = await sb.rpc('debug_set_pet', { p_target: id, p_food: st ? st.food : null, p_hours_ago: st ? st.h : 0 });
     if (error) { b.disabled = false; return toast("Couldn't change it. " + esc(error.message || '')); }
@@ -1611,6 +1617,7 @@ async function loadMessages() {
     const { data, error } = await sb.from('pack_messages').select('user_id,body,created_at');
     if (error) throw error;
     const next = Object.fromEntries(data.map(m => [m.user_id, m]));
+    addFakeMessages(next);
     if (JSON.stringify(next) === JSON.stringify(messages)) return;
     messages = next;
   } catch (e) { console.error(e); return; }
@@ -2029,4 +2036,110 @@ function petBackHome() {
   const now = performance.now() / 1000;
   roam.x = 0; roam.z = 0; roam.y = 0; roam.heading = 0; roam.tx = 0; roam.tz = 0; roam.last = 0;
   roam.state = 'idle'; roam.act = { name: 'idle', emote: '', dur: 6 }; roam.until = now + 6;
+}
+
+
+/* ============ placeholder friends (debug accounts only) ============
+   Pretend friends that live only in this app on this device: they show up in Friends,
+   the Crew run (with cart, buddies and chat bubbles) and the debug controls, but they
+   never touch the database, so challenges and "ran with" tagging only offer real friends. */
+const FAKE_KEY = () => 'runagotchi.fakes.' + (profile ? profile.id : '');
+const FAKE_NAMES = ['Pip', 'Zippy', 'Mochi', 'Bean', 'Nugget', 'Blitz', 'Tofu', 'Sprout', 'Dash', 'Biscuit', 'Comet', 'Pebble', 'Noodle', 'Waffle'];
+const FAKE_LINES = ['Morning run? 🌅', 'Who stole my snacks', 'PB today!! 🏃', 'legs = jelly', 'Rain run, who is in?', 'Pull me, I am sick 🤧', 'Saturday long run?', '5 km done ✅'];
+let fakes = null;
+function loadFakes() {
+  if (fakes) return fakes;
+  try { fakes = JSON.parse(localStorage.getItem(FAKE_KEY()) || '[]'); } catch (e) { fakes = []; }
+  return fakes;
+}
+function saveFakes() { try { localStorage.setItem(FAKE_KEY(), JSON.stringify(fakes)); } catch (e) {} }
+const pickOf = a => a[Math.floor(Math.random() * a.length)];
+function newFake(over = {}) {
+  const used = new Set(loadFakes().map(f => f.pet.name));
+  const name = FAKE_NAMES.find(n => !used.has(n)) || 'Buddy' + (fakes.length + 1);
+  const level = 1 + Math.floor(Math.random() * 12);
+  return {
+    id: 'fake-' + Math.random().toString(36).slice(2, 10), username: 'test_' + name.toLowerCase(),
+    pet: { name, shape: pickOf(Object.keys(SHAPES3D)), color: pickOf(Object.keys(COLORS)), pattern: pickOf(Object.keys(PATTERNS)), acc: pickOf(Object.keys(ACCS)), difficulty: 'normal' },
+    food: 40 + Math.round(Math.random() * 60), zeroAt: null, dead: false, at: Date.now(),
+    level, stage: level < 4 ? 'baby' : level < 8 ? 'kid' : 'grown', condition: null, buddy: false, message: null, ...over,
+  };
+}
+// put the placeholders into the loaded friend data
+function addFakeFriends() {
+  if (!isDebug() || !profile) return;
+  const me = profile.id;
+  friends.rows = friends.rows.filter(r => !r.fake);
+  for (const f of loadFakes()) {
+    friends.rows.push({ id: 'row-' + f.id, requester: me, addressee: f.id, status: 'accepted', created_at: new Date(f.at).toISOString(), fake: true });
+    friends.profiles[f.id] = { id: f.id, username: f.username, is_debug: true, fake: true, last_seen: new Date().toISOString() };
+    friends.pets[f.id] = {
+      user_id: f.id, ...f.pet, food: f.food, dead: f.dead, zero_at: f.zeroAt ? new Date(f.zeroAt).toISOString() : null,
+      death_at: f.dead ? new Date(f.at).toISOString() : null, snapshot_at: new Date(f.at).toISOString(), level: f.level, stage: f.stage,
+      condition: f.condition, condition_since: f.condition ? new Date(f.at).toISOString() : null, fake: true,
+    };
+  }
+}
+function addFakeBuddies() { if (isDebug()) for (const f of loadFakes()) if (f.buddy) buddyPairs.add(pairKey(profile.id, f.id)); }
+function addFakeMessages(map) { if (isDebug()) for (const f of loadFakes()) if (f.message) map[f.id] = { user_id: f.id, body: f.message, created_at: new Date(f.msgAt || Date.now()).toISOString() }; }
+function refreshFakes() {
+  saveFakes(); addFakeFriends();
+  buddyPairs = computeBuddyPairs(); addFakeBuddies();
+  for (const k of Object.keys(messages)) if (k.startsWith('fake-')) delete messages[k];
+  addFakeMessages(messages);
+  render();
+}
+function setFakeState(id, st) {
+  const f = loadFakes().find(x => x.id === id); if (!f) return;
+  f.at = Date.now();
+  if (!st) { f.food = 60; f.zeroAt = null; f.dead = false; }
+  else if (st.food > 0) { f.food = st.food; f.zeroAt = null; f.dead = false; }
+  else if (st.h >= GRACE_H) { f.food = 0; f.zeroAt = Date.now() - st.h * H; f.dead = true; }
+  else { f.food = 0; f.zeroAt = Date.now() - st.h * H; f.dead = false; }
+  refreshFakes(); toast(`${esc(f.pet.name)}: <b>${st ? st.label : 'reset'}</b>.`);
+}
+function removeFake(id) { fakes = loadFakes().filter(f => f.id !== id); delete friends.profiles[id]; delete friends.pets[id]; refreshFakes(); toast('Placeholder friend removed.'); }
+function fakeFriendsHTML() {
+  const list = loadFakes();
+  const chip = (id, k, label, on) => `<button class="chip small ${on ? 'sel' : ''}" data-fk="${id}|${k}">${label}</button>`;
+  return `<div class="dbg-fakes">
+    <div class="row" style="margin-top:12px"><b>Placeholder friends</b> <span class="small muted">only on this device · ${list.length}</span></div>
+    <div class="chips" style="margin:6px 0 8px">
+      <button class="chip small" data-fkall="one">+ Add one</button>
+      <button class="chip small" data-fkall="set">+ Add a test set</button>
+      ${list.length ? '<button class="chip small" data-fkall="clear">Remove all</button>' : ''}
+    </div>
+    ${list.map(f => `<div class="dbg-row">
+      <div class="dbg-who"><b>${esc(f.pet.name)}</b><span class="small muted">@${esc(f.username)} · LV ${f.level}</span></div>
+      <div class="chips">
+        ${chip(f.id, 'sick', '🤒 Sick', f.condition === 'sick')}${chip(f.id, 'injured', '🩹 Injured', f.condition === 'injured')}
+        ${chip(f.id, 'buddy', '🤝 Ran with me', f.buddy)}${chip(f.id, 'msg', f.message ? '💬 New message' : '💬 Say something', false)}
+        ${f.message ? chip(f.id, 'nomsg', 'No message', false) : ''}${chip(f.id, 'del', '✕ Remove', false)}
+      </div></div>`).join('')}
+    ${list.length ? '<p class="small muted" style="margin:6px 0 0">Set their hunger with the buttons above. Placeholders can\'t join challenges or be tagged in runs (those need real accounts).</p>' : ''}
+  </div>`;
+}
+function bindFakeFriends() {
+  document.querySelectorAll('[data-fkall]').forEach(b => b.onclick = () => {
+    const k = b.dataset.fkall; loadFakes();
+    if (k === 'clear') { for (const f of fakes) { delete friends.profiles[f.id]; delete friends.pets[f.id]; } fakes = []; }
+    else if (k === 'one') fakes.push(newFake());
+    else {
+      // one of each situation, so every friend feature has something to show
+      const t = Date.now();
+      for (const o of [{ food: 95, buddy: true, message: '5 km done ✅', msgAt: t }, { food: 65, buddy: true }, { food: 30 },
+        { food: 8, message: 'feed me 😩', msgAt: t }, { food: 0, zeroAt: t - 2 * H }, { food: 0, zeroAt: t - 80 * H, dead: true },
+        { food: 70, condition: 'sick', message: 'Pull me, I am sick 🤧', msgAt: t }, { food: 50, condition: 'injured' }]) fakes.push(newFake(o));   // one at a time, so names don't repeat
+    }
+    refreshFakes();
+  });
+  document.querySelectorAll('[data-fk]').forEach(b => b.onclick = () => {
+    const [id, k] = b.dataset.fk.split('|'), f = loadFakes().find(x => x.id === id); if (!f) return;
+    if (k === 'del') return removeFake(id);
+    if (k === 'sick' || k === 'injured') { f.condition = f.condition === k ? null : k; f.at = Date.now(); }
+    if (k === 'buddy') f.buddy = !f.buddy;
+    if (k === 'msg') { f.message = pickOf(FAKE_LINES.filter(l => l !== f.message)); f.msgAt = Date.now(); }
+    if (k === 'nomsg') f.message = null;
+    refreshFakes();
+  });
 }
