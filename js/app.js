@@ -1826,22 +1826,25 @@ const GARDEN = {
 };
 function gardenRoom(hour, pet) {
   const tod = hour >= 21 || hour < 6 ? 'night' : hour >= 18 ? 'dusk' : hour < 8 ? 'dawn' : 'day';
+  // Every object gets its own 3D layer with the same camera, and the layers are stacked far → near.
+  // That way the drawing order never depends on the browser's 3D sorting (Safari gets it wrong).
+  const L = html => `<div class="lyr"><div class="cam">${html}</div></div>`;
   // b = billboard standing on the ground line; x = horizontal position in % of the screen, z = depth in px (negative = further away)
-  const b = (cls, x, z, w, html) => `<div class="bb ${cls}" style="--x:${x}%;--z:${z}px;--w:${w}%">${html}</div>`;
-  // a = something in the air: same as b, but the picture hangs at the top of a column of height h (% of the screen)
-  const a = (cls, x, z, w, h, html) => `<div class="bb air ${cls}" style="--x:${x}%;--z:${z}px;--w:${w}%;--h:${h}%">${html}</div>`;
-  return `<div class="room ${tod}" aria-hidden="true"><div class="world">
+  const b = (cls, x, z, w, html) => L(`<div class="bb ${cls}" style="--x:${x}%;--z:${z}px;--w:${w}%">${html}</div>`);
+  // a = something in the air: the picture hangs at the top of a column of height h (% of the screen)
+  const a = (cls, x, z, w, h, html) => L(`<div class="bb air ${cls}" style="--x:${x}%;--z:${z}px;--w:${w}%;--h:${h}%">${html}</div>`);
+  return `<div class="room ${tod}" aria-hidden="true">
     ${a('sunbb', 68, -1100, 22, 128, GARDEN.sun)}
     ${a('cloudbb', 30, -1000, 40, 120, GARDEN.cloud)}
     ${a('cloudbb', 88, -800, 30, 95, GARDEN.cloud)}
-    <div class="floor"><div class="pond"></div><div class="path"></div></div>
+    ${L('<div class="floor"><div class="pond"></div><div class="path"></div></div>')}
     ${b('hills', 50, -1100, 2000, GARDEN.hills)}
     ${b('', 30, -700, 60, GARDEN.cliff)}
     ${b('', 75, -560, 18, GARDEN.palm)}
-    ${b('', 4, -140, 46, GARDEN.palm)}
     ${b('', 92, -230, 34, GARDEN.tree)}
+    ${b('', 4, -140, 46, GARDEN.palm)}
     ${b('petbb', 50, 0, 70, pet)}
     ${b('', 6, 120, 22, GARDEN.tuft('#ff7eb6', '#ffe36b'))}
     ${b('', 95, 150, 20, GARDEN.tuft('#fff', '#ffd23f'))}
-  </div></div>`;
+  </div>`;
 }
