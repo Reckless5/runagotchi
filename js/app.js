@@ -596,7 +596,7 @@ function header() {
       <span class="ni">${icon}${n ? `<span class="pill">${n}</span>` : ''}</span><span class="nl">${label}</span></button>`).join('')}</nav>` : ''}`;
 }
 const NAV_ICONS = {
-  pet: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="10" r="2.2"/><circle cx="9.5" cy="5.5" r="2.2"/><circle cx="14.5" cy="5.5" r="2.2"/><circle cx="18.5" cy="10" r="2.2"/><path d="M12 11.5c-3 0-6 3.6-6 6.2 0 1.6 1.3 2.5 2.8 2.5 1.2 0 2-.6 3.2-.6s2 .6 3.2.6c1.5 0 2.8-.9 2.8-2.5 0-2.6-3-6.2-6-6.2z"/></svg>',
+  pet: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c4.6 0 7.5 4.6 7.5 10s-3.2 9-7.5 9-7.5-3.6-7.5-9 2.9-10 7.5-10z"/><rect x="8" y="7.5" width="8" height="6.5" rx="1.6"/><circle cx="10.6" cy="10.4" r=".5" class="dot"/><circle cx="13.4" cy="10.4" r=".5" class="dot"/><circle cx="9" cy="17.3" r="1" class="dot"/><circle cx="12" cy="18.2" r="1" class="dot"/><circle cx="15" cy="17.3" r="1" class="dot"/></svg>',
   run: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="15" cy="4.5" r="2"/><path d="M5 21l4-6 3.5 2.5V22M8 11l3.5-3.5 3 2.5 3 1M11.5 7.5l1 5.5-3 2.5M14.5 10l-1.5 4.5 3 2.5"/></svg>',
   challenge: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0V4zM7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5A3.5 3.5 0 0 1 16.5 11M12 14v3.5M8.5 21h7M9.5 17.5h5"/></svg>',
   friends: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.8-.4 5 1.8 5 4.8"/></svg>',
