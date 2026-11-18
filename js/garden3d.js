@@ -103,7 +103,7 @@ function buildWorld(scene) {
 
 export function createGarden() {
   let R = null, scene, cam, hemi, sun, parts, pet = null, petKey = '', tod = '', container = null;
-  let view = { x: 0, z: 0 }, heading = 0, size = 0;
+  let view = { x: 0, z: 0 }, heading = 0, size = 0, lastRender = 0, visible = true, io = null;
   const g = {
     active: false,
     ok: true,
@@ -114,19 +114,25 @@ export function createGarden() {
         } catch (e) { g.ok = false; return false; }
         R.outputColorSpace = THREE.SRGBColorSpace;
         R.shadowMap.enabled = true; R.shadowMap.type = THREE.PCFSoftShadowMap;
-        R.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+        R.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));   // sharper than 1.5× costs a lot and is hard to see
         R.domElement.className = 'g3d-canvas';
         scene = new THREE.Scene();
         cam = new THREE.PerspectiveCamera(2 * Math.atan(W / 2 / PERSP) * 180 / Math.PI, 1, 0.05, 80);
         hemi = new THREE.HemisphereLight('#ffffff', '#7cc862', 1.2); scene.add(hemi);
         sun = new THREE.DirectionalLight('#ffffff', 2.2); sun.castShadow = true;
-        sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 0.5, far: 30 });
+        sun.shadow.mapSize.set(512, 512); Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 0.5, far: 30 });
         sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.02;
         scene.add(sun, sun.target);
         parts = buildWorld(scene);
       }
       container = el; g.active = true;
-      if (R.domElement.parentNode !== el) el.prepend(R.domElement);
+      if (R.domElement.parentNode !== el) {
+        el.prepend(R.domElement);
+        // stop drawing while the garden is scrolled out of view
+        if (io) io.disconnect();
+        if ('IntersectionObserver' in window) { io = new IntersectionObserver(es => { visible = es[es.length - 1].isIntersecting; }); io.observe(el); }
+        lastRender = 0;
+      }
       g.resize();
       if (spec.tod !== tod) g.setTime(spec.tod);
       const key = JSON.stringify([spec.pet, spec.mood, spec.stage]);
@@ -137,7 +143,7 @@ export function createGarden() {
       }
       return true;
     },
-    detach() { g.active = false; container = null; },
+    detach() { g.active = false; container = null; if (io) { io.disconnect(); io = null; } },
     resize() {
       if (!container) return;
       const s = Math.max(1, Math.round(container.clientWidth));
@@ -155,12 +161,14 @@ export function createGarden() {
     /* tilt: {x, y} −1…1 · p: {x, z} pet position in old px units, y: hop (px, negative = up), heading (rad), state */
     frame(t, tilt, p) {
       if (!g.active || !container || !container.isConnected) { g.active = false; return null; }
+      if (!visible) return g.lastHead || null;   // scrolled out of view: don't draw (the app calls this ~30× per second)
+      lastRender = t;
       g.resize();
       const px = p.x / 100, pz = p.z / 100;
       // the pet
       if (pet) {
         pet.position.set(px, -p.y / 100, pz);
-        let d = p.heading - heading; d = Math.atan2(Math.sin(d), Math.cos(d)); heading += d * 0.12;
+        let d = p.heading - heading; d = Math.atan2(Math.sin(d), Math.cos(d)); heading += d * 0.2;
         pet.rotation.y = heading;
         const ud = pet.userData, s = p.state, now = t / 1000;
         const walk = s === 'walk', step = walk ? Math.sin(now * (p.slow ? 5 : 9)) : 0;
@@ -172,7 +180,7 @@ export function createGarden() {
         if (s === 'sleep') ud.inner.rotation.z = Math.sin(now * 1.2) * 0.04; else ud.inner.rotation.z = 0;
       }
       // camera: locked on the pet, orbiting with the tilt
-      view.x += (px - view.x) * 0.08; view.z += (pz - view.z) * 0.08;
+      view.x += (px - view.x) * 0.14; view.z += (pz - view.z) * 0.14;
       const yaw = tilt.x * 11 * Math.PI / 180, pitch = tilt.y * 6 * Math.PI / 180;
       const off = new THREE.Vector3(0, EYE, PERSP).applyAxisAngle(new THREE.Vector3(1, 0, 0), -pitch).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
       cam.position.set(view.x + off.x, off.y, view.z + off.z);
@@ -186,7 +194,7 @@ export function createGarden() {
       // where the pet's head is on screen, for the speech bubble (0…1)
       if (!pet) return null;
       const head = new THREE.Vector3(px, pet.userData.height - p.y / 100 + 0.12, pz).project(cam);
-      return { x: (head.x + 1) / 2, y: (1 - head.y) / 2 };
+      return (g.lastHead = { x: (head.x + 1) / 2, y: (1 - head.y) / 2 });
     },
   };
   return g;

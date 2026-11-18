@@ -1794,21 +1794,28 @@ function bindTilt() {
   st.onpointerleave = () => { tilt.pointer = null; };
   const sc = $('#screen');
   if (sc) sc.onclick = () => petTapped();
+  if ('IntersectionObserver' in window && tilt.observed !== st) {
+    if (tilt.io) tilt.io.disconnect();
+    tilt.io = new IntersectionObserver(es => { tilt.visible = es[es.length - 1].isIntersecting; if (tilt.visible) roam.last = 0; });
+    tilt.io.observe(st); tilt.observed = st;
+  }
   if (!tilt.running) { tilt.running = true; requestAnimationFrame(tiltFrame); }
 }
 function tiltFrame(t) {
   const st = document.getElementById('stage3d');
   if (!st) { tilt.running = false; return; }
-  if (!document.hidden) {
+  // 30 frames per second, and nothing while the pet is scrolled out of view
+  if (!document.hidden && tilt.visible !== false && t - (tilt.lastT || 0) >= 31) {
+    tilt.lastT = t;
     let tx, ty;
     if (reducedMotion()) { tx = 0; ty = 0; }
     else if (performance.now() - tilt.lastGyro < 1500 && tilt.gx != null) { tx = tilt.gx; ty = tilt.gy; }
     else if (tilt.pointer) { tx = tilt.pointer.x; ty = tilt.pointer.y; }
     else { const s = t / 1000; tx = Math.sin(s * 0.55) * 0.55 + Math.sin(s * 0.23) * 0.2; ty = Math.sin(s * 0.41 + 1.3) * 0.35; }
-    tilt.x += (tx - tilt.x) * 0.08; tilt.y += (ty - tilt.y) * 0.08;
+    tilt.x += (tx - tilt.x) * 0.15; tilt.y += (ty - tilt.y) * 0.15;
     st.style.setProperty('--tx', tilt.x.toFixed(3)); st.style.setProperty('--ty', tilt.y.toFixed(3));
     roamStep(st, t);
-  } else roam.last = 0;
+  } else if (document.hidden || tilt.visible === false) roam.last = 0;   // don't jump ahead after a pause
   requestAnimationFrame(tiltFrame);
 }
 

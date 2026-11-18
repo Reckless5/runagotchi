@@ -265,7 +265,7 @@ export function petImage(p, mood, stage, { pose = 'front', size = 160 } = {}) {
   T.scene.add(pet);
   // frame the full-grown size so pets of different stages keep their relative size
   T.cam.position.set(0, 1.25, 4.5); T.cam.lookAt(0, 0.6, 0);
-  const px = Math.round(size * Math.min(2, window.devicePixelRatio || 1));
+  const px = Math.round(size * Math.min(1.5, window.devicePixelRatio || 1));
   T.r.setSize(px, px, false);
   T.r.render(T.scene, T.cam);
   const url = T.r.domElement.toDataURL('image/png');
