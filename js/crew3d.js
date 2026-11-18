@@ -1,8 +1,8 @@
 /* Runagotchi 3D Crew run, retro console style (see gc3d.js).
-   Side view of a running track; the scenery streams past while the pets run on the spot.
+   Side view of a meadow; the scenery streams past while the pets run on the spot.
    app.js still decides where every pet runs (left % and bottom px of the scene, like the
    flat version), so the name tags, chat bubbles and 🤝 links stay plain HTML. Each pet is
-   placed where a ray from the camera through that screen spot meets the track. */
+   placed where a ray from the camera through that screen spot meets the ground. */
 import { buildPet } from './pet3d.js';
 import { THREE, renderer, TEX, lam, texMat, SKIES, applySky, lights, blobShadow, palm, tree, pine, rock, flower, grassTuft, terrain, rr } from './gc3d.js';
 
@@ -12,25 +12,15 @@ const FOV = 32;
 
 function buildWorld(scene) {
   const A = { movers: [] };
-  // ground behind the track rises into hills; flat strip for the track and verge
+  // flat meadow near the camera, rising into hills further back
   const flat = (x, z) => -z - 3;                 // flat from z = −3 towards the camera
-  scene.add(terrain(70, 46, flat, 0, -18, 64));
-  // track: tartan with white edge lines
-  const tt = TEX.tartan().clone(); tt.needsUpdate = true; tt.repeat.set(30 / 2, 1); A.track = tt;
-  const track = new THREE.Mesh(new THREE.PlaneGeometry(30, 1.9), lam({ map: tt })); track.rotation.x = -Math.PI / 2; track.position.set(0, 0.004, 1.7); scene.add(track);
-  for (const z of [0.78, 2.62]) { const l = new THREE.Mesh(new THREE.PlaneGeometry(30, 0.05), lam({ color: '#ffffff', emissive: '#ffffff', emissiveIntensity: 0.2 })); l.rotation.x = -Math.PI / 2; l.position.set(0, 0.008, z); scene.add(l); }
-  // dashed middle line (streams with the track)
-  const dt = new THREE.CanvasTexture((() => { const c = document.createElement('canvas'); c.width = 64; c.height = 4; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 32, 4); return c; })());
-  dt.wrapS = THREE.RepeatWrapping; dt.repeat.set(30 / 1.2, 1); A.dash = dt;
-  const dash = new THREE.Mesh(new THREE.PlaneGeometry(30, 0.04), new THREE.MeshBasicMaterial({ map: dt, transparent: true, alphaTest: 0.5 }));
-  dash.rotation.x = -Math.PI / 2; dash.position.set(0, 0.009, 1.7); scene.add(dash);
-  // near verge: grass in front of the track
-  const vt = TEX.grass().clone(); vt.needsUpdate = true; vt.repeat.set(25, 2); A.verge = vt;
-  const verge = new THREE.Mesh(new THREE.PlaneGeometry(30, 2.4), lam({ map: vt })); verge.rotation.x = -Math.PI / 2; verge.position.set(0, 0.002, 3.8); scene.add(verge);
-  const gt = TEX.grass().clone(); gt.needsUpdate = true; gt.repeat.set(25, 3); A.field = gt;
-  const field = new THREE.Mesh(new THREE.PlaneGeometry(30, 3.8), lam({ map: gt })); field.rotation.x = -Math.PI / 2; field.position.set(0, 0.002, -1.1); scene.add(field);
+  const ground = terrain(70, 46, flat, 0, -18, 64); scene.add(ground);
+  A.hAt = (x, z) => Math.max(0, ground.userData.heightAt(x, z));
+  // the meadow the pets run on (its grass streams past with the scenery)
+  const gt = TEX.grass().clone(); gt.needsUpdate = true; gt.repeat.set(25, 6.5); A.field = gt;
+  const field = new THREE.Mesh(new THREE.PlaneGeometry(30, 8), lam({ map: gt })); field.rotation.x = -Math.PI / 2; field.position.set(0, 0.002, 1.0); scene.add(field);
   // scenery that streams past (wraps around)
-  const add = (o, x, z, ry = rr(0, 6)) => { o.position.set(x, 0, z); o.rotation.y = ry; scene.add(o); A.movers.push(o); return o; };
+  const add = (o, x, z, ry = rr(0, 6)) => { o.position.set(x, A.hAt(x, z), z); o.rotation.y = ry; scene.add(o); A.movers.push(o); return o; };
   const petals = ['#ff7eb6', '#ffffff', '#ffd23f', '#8fd0ff'];
   for (let i = 0; i < 9; i++) add([() => palm(rr(1.5, 2.1)), () => tree(rr(0.9, 1.25), rand2()), () => pine(rr(1.3, 1.9))][i % 3](), -SPAN / 2 + i * SPAN / 9 + rr(-0.6, 0.6), rr(-3.2, -1.4));
   for (let i = 0; i < 7; i++) add([() => pine(rr(1.8, 2.6)), () => palm(rr(2, 2.6)), () => tree(rr(1.3, 1.6), false)][i % 3](), -SPAN / 2 + i * SPAN / 7 + rr(-1, 1), rr(-7, -4.5));
@@ -171,7 +161,7 @@ export function createCrew() {
       if (w !== size[0] || h !== size[1]) {
         size = [w, h]; R.setSize(w, h, false); R.domElement.style.width = R.domElement.style.height = '100%';
         cam.aspect = w / h;
-        // keep the track the same height on any phone: widen the view on wide screens
+        // fixed camera; wider phones simply see a bit more to the sides
         cam.position.set(0, 2.5, 8.6); cam.lookAt(0, 0.75, 0); cam.updateProjectionMatrix(); cam.updateMatrixWorld();
         c.layout();
       }
@@ -185,9 +175,9 @@ export function createCrew() {
       const moving = !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
       const dx = moving ? SPEED * (c.lastT ? Math.min(0.1, now - c.lastT) : 0) : 0; c.lastT = now;
       // stream the world to the left
-      A.movers.forEach(o => { o.position.x -= dx; if (o.position.x < -SPAN / 2 - 2) o.position.x += SPAN + 4; });
+      A.movers.forEach(o => { o.position.x -= dx; if (o.position.x < -SPAN / 2 - 2) o.position.x += SPAN + 4; o.position.y = A.hAt(o.position.x, o.position.z); });   // follow the hills
       const off = (now * SPEED) % 1000;
-      A.track.offset.x = (off / 2) % 1; A.dash.offset.x = (off / 1.2) % 1; A.verge.offset.x = (off / 1.2) % 1; A.field.offset.x = (off / 1.2) % 1;
+      A.field.offset.x = (off / 1.2) % 1;
       A.far.position.x = -((now * 0.15) % 8);
       // running pets
       for (const [, e] of pets) {

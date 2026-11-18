@@ -12,9 +12,8 @@ function buildWorld(scene) {
   const anim = {};
   // ground: flat play area, soft hills around it (distance outside the play area → height)
   const flat = (x, z) => Math.max(Math.abs(x) - 3.2, -4.6 - z, z - 3.5);
-  scene.add(terrain(44, 44, flat, 0, -10, 72));
-  // sandy path
-  const path = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 5.2), texMat(TEX.sand(), 1, 12)); path.rotation.x = -Math.PI / 2; path.position.set(0, 0.006, -2.4); scene.add(path);
+  const ground = terrain(44, 44, flat, 0, -10, 72); scene.add(ground);
+  const hAt = (x, z) => Math.max(0, ground.userData.heightAt(x, z));
   // pond with a cobble rim and moving water
   const pond = new THREE.Group(); pond.position.set(0.36 * W, 0, -1.65); pond.scale.set(0.67, 1, 1.1); scene.add(pond);
   const rim = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.07, 6, 32), texMat(TEX.stone(), 8, 1)); rim.rotation.x = -Math.PI / 2; rim.scale.z = 0.6; rim.position.y = 0.03;
@@ -28,17 +27,18 @@ function buildWorld(scene) {
   const cg = new THREE.CylinderGeometry(0.85, 1.05, 2.7, 10, 4); const cp = cg.attributes.position;
   for (let i = 0; i < cp.count; i++) { const k = 1 + 0.12 * Math.sin(cp.getY(i) * 5 + Math.atan2(cp.getX(i), cp.getZ(i)) * 3); cp.setX(i, cp.getX(i) * k); cp.setZ(i, cp.getZ(i) * k); }
   cg.computeVertexNormals();
-  const cliff = new THREE.Mesh(cg, texMat(TEX.rock(), 3, 2)); cliff.position.set(cx, 1.3, cz); scene.add(cliff);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.9, 0.18, 10), texMat(TEX.grass(), 1.5, 0.3)); cap.position.set(cx, 2.68, cz); scene.add(cap);
+  const cy0 = hAt(cx, cz);
+  const cliff = new THREE.Mesh(cg, texMat(TEX.rock(), 3, 2)); cliff.position.set(cx, cy0 + 1.3, cz); scene.add(cliff);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.9, 0.18, 10), texMat(TEX.grass(), 1.5, 0.3)); cap.position.set(cx, cy0 + 2.68, cz); scene.add(cap);
   const ft = TEX.fall().clone(); ft.needsUpdate = true; ft.repeat.set(1, 2); anim.fall = ft;
   const fall = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 2.5), lam({ map: ft, transparent: true, opacity: 0.92, emissive: '#5aa8d8', emissiveIntensity: 0.35 }));
-  fall.position.set(cx + 0.05, 1.32, cz + 1.0); scene.add(fall);
+  fall.position.set(cx + 0.05, cy0 + 1.32, cz + 1.0); scene.add(fall);
   const foamMat = lam({ color: '#ffffff', transparent: true, opacity: 0.85, emissive: '#ffffff', emissiveIntensity: 0.3 });
   anim.foam = [];
-  for (let k = 0; k < 6; k++) { const f = new THREE.Mesh(new THREE.IcosahedronGeometry(rr(0.08, 0.14), 0), foamMat); f.position.set(cx + rr(-0.22, 0.28), 0.06, cz + 1.05 + rr(-0.05, 0.1)); f.userData.ph = rr(0, 6); scene.add(f); anim.foam.push(f); }
-  for (const [dx, dz, s] of [[-1.1, 0.4, 0.7], [1.0, 0.6, 0.55], [1.5, -0.2, 0.8]]) { const r = rock(s); r.position.set(cx + dx, 0.05, cz + dz); scene.add(r); }
+  for (let k = 0; k < 6; k++) { const f = new THREE.Mesh(new THREE.IcosahedronGeometry(rr(0.08, 0.14), 0), foamMat); f.position.set(cx + rr(-0.22, 0.28), cy0 + 0.06, cz + 1.05 + rr(-0.05, 0.1)); f.userData.ph = rr(0, 6); scene.add(f); anim.foam.push(f); }
+  for (const [dx, dz, s] of [[-1.1, 0.4, 0.7], [1.0, 0.6, 0.55], [1.5, -0.2, 0.8]]) { const r = rock(s); r.position.set(cx + dx, hAt(cx + dx, cz + dz) + 0.05, cz + dz); scene.add(r); }
   // palms, trees, flowers — the near palm and the fruit tree are walking spots
-  const put = (o, x, z, ry = 0) => { o.position.set(x, 0, z); o.rotation.y = ry; scene.add(o); return o; };
+  const put = (o, x, z, ry = 0) => { o.position.set(x, hAt(x, z), z); o.rotation.y = ry; scene.add(o); return o; };
   put(palm(1.7), ...at(4, -140), 0.4);
   put(palm(1.3, 0.12), ...at(75, -560), 2.1);
   put(tree(1.05), ...at(92, -230));

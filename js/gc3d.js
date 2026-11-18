@@ -205,11 +205,11 @@ export function grassTuft(s = 1) {
 export function terrain(w, d, flat, cx = 0, cz = 0, seg = 64) {
   const geo = new THREE.PlaneGeometry(w, d, seg, seg); geo.rotateX(-Math.PI / 2);
   const p = geo.attributes.position, col = [];
+  const noise = (x, z) => Math.sin(x * 0.55) * Math.cos(z * 0.43) + 0.6 * Math.sin(x * 1.3 + 1) * Math.sin(z * 1.1 + 2) + 0.4;
+  const heightAt = (x, z) => { const d = flat(x, z); return d > 0 ? Math.min(1, d / 4) ** 1.6 * (1.2 + noise(x, z) * 0.9) : 0; };
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i) + cx, z = p.getZ(i) + cz;
-    const dist = flat(x, z);
-    const n = Math.sin(x * 0.55) * Math.cos(z * 0.43) + 0.6 * Math.sin(x * 1.3 + 1) * Math.sin(z * 1.1 + 2) + 0.4;
-    const y = dist > 0 ? Math.min(1, dist / 4) ** 1.6 * (1.2 + n * 0.9) : 0;
+    const n = noise(x, z), y = heightAt(x, z);
     p.setY(i, y);
     const shade = 0.82 + Math.min(0.18, y * 0.08) + n * 0.03; col.push(shade, shade, shade);
   }
@@ -217,6 +217,9 @@ export function terrain(w, d, flat, cx = 0, cz = 0, seg = 64) {
   geo.computeVertexNormals();
   const t = TEX.grass().clone(); t.needsUpdate = true; t.repeat.set(w / 1.2, d / 1.2);
   const m = new THREE.Mesh(geo, lam({ map: t, vertexColors: true }));
-  m.position.set(cx, 0, cz); return m;
+  m.position.set(cx, 0, cz);
+  // the mesh is made of flat triangles; sink props a little so they never float over a dip
+  m.userData.heightAt = (x, z) => heightAt(x, z) - 0.06;
+  return m;
 }
 export { THREE };
