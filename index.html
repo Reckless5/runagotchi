@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Runagotchi</title>
 <style>
 @font-face{font-family:Fredoka;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/fredoka-latin-400-normal.woff2) format('woff2')}
@@ -136,6 +136,20 @@ details.settings summary::-webkit-details-marker{display:none}
 .tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#ece3d2;border-radius:14px;padding:4px;margin:0 0 16px}
 .tabs button{border:0;background:transparent;border-radius:10px;padding:9px;font-weight:600;font-size:15px;color:var(--muted)}
 .tabs button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:12;display:grid;grid-template-columns:repeat(4,1fr);max-width:480px;margin:0 auto;
+  background:rgba(255,251,243,.96);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-top:1px solid var(--line);
+  padding:6px 6px calc(6px + env(safe-area-inset-bottom));box-shadow:0 -4px 16px rgba(60,40,10,.06)}
+@media (min-width:481px){.bottomnav{border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0}}
+.bottomnav button{border:0;background:transparent;display:flex;flex-direction:column;align-items:center;gap:2px;padding:5px 2px;border-radius:12px;color:var(--muted);font:inherit;font-weight:600;font-size:12px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.bottomnav .ni{position:relative;display:flex;align-items:center;justify-content:center;width:52px;height:30px;border-radius:999px;transition:background .15s}
+.bottomnav svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.bottomnav button[data-tab=pet] svg{fill:currentColor;stroke:none}
+.bottomnav button.on{color:var(--ink)}
+.bottomnav button.on .ni{background:#ffe1d3;color:var(--accent)}
+.bottomnav .pill{position:absolute;top:-4px;right:2px;margin:0;min-width:18px;line-height:18px;font-size:11px;padding:0 5px}
+body.hasnav .wrap{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+body.hasnav .toast{bottom:calc(84px + env(safe-area-inset-bottom))}
+.scene{isolation:isolate}
 .pill{display:inline-block;min-width:20px;padding:0 6px;border-radius:999px;background:var(--accent);color:#fff;font-size:12px;line-height:20px;margin-left:4px}
 
 /* auth */

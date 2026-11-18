@@ -587,9 +587,22 @@ function header() {
   const incoming = mode === 'cloud' ? friends.rows.filter(r => r.status === 'pending' && r.addressee === profile.id).length : 0;
   const invites = mode === 'cloud' ? challenges.list.filter(c => myStatus(c) === 'invited' && c.end > Date.now()).length : 0;
   return `<header class="top"><div class="brand">Run<span>agotchi</span></div>${right}</header>
-    ${mode === 'cloud' ? `<div class="tabs four"><button data-tab="pet" class="${tab === 'pet' ? 'on' : ''}">My pet</button><button data-tab="run" class="${tab === 'run' ? 'on' : ''}">Run</button><button data-tab="challenge" class="${tab === 'challenge' ? 'on' : ''}">Challenge${invites ? `<span class="pill">${invites}</span>` : ''}</button><button data-tab="friends" class="${tab === 'friends' ? 'on' : ''}">Friends${incoming ? `<span class="pill">${incoming}</span>` : ''}</button></div>` : ''}`;
+    ${mode === 'cloud' ? `<nav class="bottomnav" aria-label="Main">${[
+      ['pet', 'My pet', NAV_ICONS.pet, 0],
+      ['run', 'Run', NAV_ICONS.run, 0],
+      ['challenge', 'Challenge', NAV_ICONS.challenge, invites],
+      ['friends', 'Friends', NAV_ICONS.friends, incoming],
+    ].map(([id, label, icon, n]) => `<button data-tab="${id}" class="${tab === id ? 'on' : ''}" ${tab === id ? 'aria-current="page"' : ''}>
+      <span class="ni">${icon}${n ? `<span class="pill">${n}</span>` : ''}</span><span class="nl">${label}</span></button>`).join('')}</nav>` : ''}`;
 }
+const NAV_ICONS = {
+  pet: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="10" r="2.2"/><circle cx="9.5" cy="5.5" r="2.2"/><circle cx="14.5" cy="5.5" r="2.2"/><circle cx="18.5" cy="10" r="2.2"/><path d="M12 11.5c-3 0-6 3.6-6 6.2 0 1.6 1.3 2.5 2.8 2.5 1.2 0 2-.6 3.2-.6s2 .6 3.2.6c1.5 0 2.8-.9 2.8-2.5 0-2.6-3-6.2-6-6.2z"/></svg>',
+  run: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="15" cy="4.5" r="2"/><path d="M5 21l4-6 3.5 2.5V22M8 11l3.5-3.5 3 2.5 3 1M11.5 7.5l1 5.5-3 2.5M14.5 10l-1.5 4.5 3 2.5"/></svg>',
+  challenge: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0V4zM7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5A3.5 3.5 0 0 1 16.5 11M12 14v3.5M8.5 21h7M9.5 17.5h5"/></svg>',
+  friends: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.8-.4 5 1.8 5 4.8"/></svg>',
+};
 function bindHeader() {
+  document.body.classList.toggle('hasnav', mode === 'cloud');
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0, 0); if (tab !== 'pet') loadFriends(); if (tab === 'challenge') loadChallenges(); if (tab === 'run' || tab === 'friends') loadBuddies(); if (tab === 'run') loadMessages(); });
 }
 function statusLine(sim, p) {
