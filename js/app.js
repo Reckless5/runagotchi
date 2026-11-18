@@ -40,6 +40,17 @@ let buddies = { loaded: false, mine: [], week: [] }, buddyPairs = new Set();
 let messages = {}; // user id -> their latest chat bubble
 const watchReturn = (() => { const q = new URLSearchParams(location.search); return q.get('watch') ? { provider: q.get('watch'), status: q.get('status'), reason: q.get('reason') } : null; })();
 if (watchReturn) history.replaceState(null, '', location.pathname);
+// Invite links look like …/?invite=CODE. The code is kept for this tab until the account exists.
+const INVITE_KEY = 'runagotchi.invite';
+let invite = (() => {
+  const q = new URLSearchParams(location.search), c = (q.get('invite') || '').trim();
+  if (c) { try { sessionStorage.setItem(INVITE_KEY, c); } catch (e) {} history.replaceState(null, '', location.pathname); }
+  try { return c || sessionStorage.getItem(INVITE_KEY) || ''; } catch (e) { return c; }
+})();
+let inviteState = invite ? 'checking' : 'none'; // none | checking | ok | bad
+let invites = { loaded: false, list: [] };       // admins: invite links they made
+if (invite) authMode = 'signup';
+const clearInvite = () => { invite = ''; inviteState = 'none'; try { sessionStorage.removeItem(INVITE_KEY); } catch (e) {} };
 const now = () => Date.now() + devOffset;
 const H = 3.6e6, D = 24 * H;
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() :
@@ -363,10 +374,11 @@ async function onSession(uid) {
   challenges = { loaded: false, loading: false, error: false, list: [], profiles: {} };
   watches = { loaded: false, enabled: {}, links: {}, setup: true };
   buddies = { loaded: false, mine: [], week: [] }; buddyPairs = new Set(); messages = {};
+  invites = { loaded: false, list: [] };
   profile = null; S = null; devOffset = 0;
   if (!uid) {
     if (isGuest()) return startLocal();
-    authMode = 'login'; screen = 'auth'; return render();
+    authMode = invite ? 'signup' : 'login'; screen = 'auth'; return render();
   }
   setGuest(false);
   screen = 'boot'; render();
@@ -418,23 +430,36 @@ function renderError() {
   $('#retry').onclick = () => onSession(currentUid);
   $('#lo').onclick = () => sb.auth.signOut();
 }
+async function checkInvite() {
+  if (!invite || inviteState !== 'checking') return;
+  try {
+    const { data, error } = await sb.rpc('invite_ok', { p_code: invite });
+    inviteState = error ? 'ok' : (data ? 'ok' : 'bad'); // if the check fails, let sign-up itself decide
+  } catch (e) { inviteState = 'ok'; }
+  if (screen === 'auth') renderAuth();
+}
 function renderAuth() {
+  if (!invite && authMode === 'signup') authMode = 'login';
   const signup = authMode === 'signup';
+  if (invite && inviteState === 'checking') checkInvite();
+  const badInvite = signup && inviteState === 'bad';
   $('#app').innerHTML = `
     <div class="auth">
       <header class="top"><div class="brand">Run<span>agotchi</span></div></header>
       <div class="mini">${petSVG(SAMPLE_PET, 'happy', 'grown', 'auth')}</div>
-      <div class="hero"><h1>${signup ? 'Create your account' : 'Welcome back'}</h1><p>A pet that lives on the kilometers you run.</p></div>
+      <div class="hero"><h1>${signup ? "You're invited!" : 'Welcome back'}</h1><p>${signup ? 'Create your account and hatch a pet that lives on the kilometers you run.' : 'A pet that lives on the kilometers you run.'}</p></div>
       <section class="card">
-        <div class="seg"><button data-m="login" class="${signup ? '' : 'on'}">Log in</button><button data-m="signup" class="${signup ? 'on' : ''}">Sign up</button></div>
+        ${invite ? `<div class="seg"><button data-m="login" class="${signup ? '' : 'on'}">Log in</button><button data-m="signup" class="${signup ? 'on' : ''}">Sign up</button></div>` : ''}
+        ${badInvite ? `<div class="err" style="margin-top:8px">This invite link has already been used or isn't valid. Ask for a new one.</div>` : ''}
         <form id="af" novalidate>
           <div class="field" style="margin-top:12px"><label for="em">Email</label><input id="em" type="email" class="text" autocomplete="email" required></div>
           <div class="field" style="margin-top:12px"><label for="pw">Password</label><input id="pw" type="password" class="text" autocomplete="${signup ? 'new-password' : 'current-password'}" minlength="6" required>
             ${signup ? '<div class="small muted" style="margin-top:6px">At least 6 characters.</div>' : ''}</div>
           <div class="err" id="aerr"></div><div class="ok" id="aok"></div>
-          <button class="btn primary" id="asub" style="width:100%">${signup ? 'Create account' : 'Log in'}</button>
+          <button class="btn primary" id="asub" style="width:100%" ${badInvite ? 'disabled' : ''}>${signup ? 'Create account' : 'Log in'}</button>
         </form>
         ${signup ? '' : '<div class="center"><button class="linkbtn" id="forgot">Forgot password?</button></div>'}
+        ${invite ? '' : '<p class="small muted center" style="margin:10px 0 0">Runagotchi is invite-only while it\'s being built. New here? Ask a friend who uses it for an invite link.</p>'}
       </section>
       <div class="center"><button class="linkbtn" id="guest" style="color:var(--muted)">Continue without an account</button>
         <div class="small muted">Your pet is saved on this device only, and you can't add friends.</div>
@@ -458,9 +483,14 @@ function renderAuth() {
     if (!password) { err.textContent = 'Enter your password.'; return; }
     const btn = $('#asub'); btn.disabled = true;
     if (signup) {
-      const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
+      const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname, data: { invite } } });
       btn.disabled = false;
-      if (error) { err.textContent = error.message; return; }
+      if (error) {
+        // The database refuses accounts without a valid invite; Supabase reports that as a database error.
+        if (/database error|invite/i.test(error.message)) { inviteState = 'bad'; return renderAuth(); }
+        err.textContent = error.message; return;
+      }
+      clearInvite();
       if (!data.session) okEl.textContent = `Almost there! We sent a confirmation link to ${email}. Open it on this device to log in.`;
     } else {
       const { error } = await sb.auth.signInWithPassword({ email, password });
@@ -662,7 +692,7 @@ function renderPet() {
   });
   if ($('#logout')) $('#logout').onclick = () => sb.auth.signOut();
   bindWatches();
-  if ($('#toAuth')) $('#toAuth').onclick = () => { setGuest(false); authMode = 'signup'; screen = 'auth'; render(); window.scrollTo(0, 0); };
+  if ($('#toAuth')) $('#toAuth').onclick = () => { setGuest(false); authMode = invite ? 'signup' : 'login'; screen = 'auth'; render(); window.scrollTo(0, 0); };
   $('#restart').onclick = () => confirmSheet('Start over?', `${esc(p.name)} will be gone for good. Your runs stay in the log, but only runs after the new pet hatches will feed it.`, 'Start over', async () => {
     S.pet = null; draft = newDraft(); render(); window.scrollTo(0, 0);
     await persistDeletePet();
@@ -744,6 +774,7 @@ function renderFriends() {
       <div class="err" id="ferr"></div><div class="ok" id="fok"></div>
       <div class="small muted">Your username is <b>@${esc(profile.username)}</b>. Send it to friends so they can add you. <button class="linkbtn" id="copyU">Copy</button></div>
     </section>
+    ${invitesCard()}
     ${incoming.length ? `<section class="card"><h2>Friend requests</h2>${incoming.map(r => `
       <div class="req"><div class="who">@${esc(name(r.requester))}</div>
         <button class="btn small" data-dec="${r.id}">Decline</button><button class="btn small primary" data-acc="${r.id}">Accept</button></div>`).join('')}</section>` : ''}
@@ -757,6 +788,7 @@ function renderFriends() {
     ${outgoing.length ? `<section class="card"><h2>Waiting for an answer</h2>${outgoing.map(r => `
       <div class="req"><div class="who">@${esc(name(r.addressee))}</div><button class="btn small" data-can="${r.id}">Cancel</button></div>`).join('')}</section>` : ''}`;
   bindHeader();
+  bindInvites();
   const fu = $('#fu');
   fu.addEventListener('keydown', e => { if (e.key === 'Enter') $('#fsend').click(); });
   $('#fsend').onclick = () => addFriend(fu.value);
@@ -1628,3 +1660,58 @@ setInterval(() => { if (mode === 'cloud' && screen === 'app' && tab === 'run' &&
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && mode === 'cloud' && screen === 'app') { refreshRuns(); loadFriends(); loadChallenges(); loadWatches(); loadBuddies(); loadMessages(); } });
 
 boot();
+
+
+/* ============ invite links (admins only) ============ */
+const isAdmin = () => mode === 'cloud' && !!(profile && profile.is_admin);
+const inviteLink = code => `${location.origin}${location.pathname}?invite=${encodeURIComponent(code)}`;
+async function loadInvites() {
+  if (!isAdmin() || invites.loading) return;
+  invites.loading = true;
+  const { data, error } = await sb.from('invites').select('code,created_at,used_by,used_at').order('created_at', { ascending: false });
+  if (error) { console.error(error); invites = { loaded: true, list: [], error: true }; return; }
+  invites = { loaded: true, list: data || [] };
+  const used = invites.list.map(i => i.used_by).filter(id => id && !friends.profiles[id]);
+  if (used.length) {
+    const { data: ps } = await sb.from('profiles').select('id,username').in('id', used);
+    (ps || []).forEach(p => { friends.profiles[p.id] = { ...(friends.profiles[p.id] || {}), ...p }; });
+  }
+  if (screen === 'app' && tab === 'friends' && !sheetOpen() && !isTyping()) render();
+}
+function invitesCard() {
+  if (!isAdmin()) return '';
+  if (!invites.loaded) { loadInvites(); }
+  const open = invites.list.filter(i => !i.used_at), used = invites.list.filter(i => i.used_at);
+  const who = id => (friends.profiles[id] || {}).username;
+  return `<section class="card">
+    <h2>Invite links <span class="small muted">admin</span></h2>
+    <p class="small muted" style="margin:0 0 10px">Runagotchi is invite-only. Each link creates one account.</p>
+    <button class="btn primary" id="newInvite" style="width:100%">+ New invite link</button>
+    ${open.length ? `<ul class="invl">${open.map(i => `<li><code>${esc(i.code)}</code><span class="small muted">${fmtAgo(Date.parse(i.created_at), Date.now())}</span>
+      <button class="btn small" data-invshare="${esc(i.code)}">Share</button><button class="btn small ghost" data-invdel="${esc(i.code)}" aria-label="Delete link">✕</button></li>`).join('')}</ul>` : ''}
+    ${used.length ? `<div class="small muted" style="margin-top:10px">Used: ${used.map(i => who(i.used_by) ? '@' + esc(who(i.used_by)) : 'new account (no username yet)').join(', ')}</div>` : ''}
+  </section>`;
+}
+async function shareInvite(code) {
+  const url = inviteLink(code), text = 'Join me on Runagotchi, the running pet app. This link creates your account:';
+  if (navigator.share) { try { await navigator.share({ title: 'Runagotchi invite', text, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+  try { await navigator.clipboard.writeText(url); toast('Invite link copied. Send it to your friend.'); }
+  catch (e) { toast(`Invite link: <b>${esc(url)}</b>`, 12000); }
+}
+function bindInvites() {
+  if (!$('#newInvite')) return;
+  $('#newInvite').onclick = async () => {
+    const b = $('#newInvite'); b.disabled = true;
+    const { data, error } = await sb.rpc('create_invite');
+    b.disabled = false;
+    if (error) return toast("Couldn't create a link. " + esc(error.message || ''));
+    invites.list.unshift({ code: data, created_at: new Date().toISOString(), used_by: null, used_at: null });
+    render(); shareInvite(data);
+  };
+  document.querySelectorAll('[data-invshare]').forEach(b => b.onclick = () => shareInvite(b.dataset.invshare));
+  document.querySelectorAll('[data-invdel]').forEach(b => b.onclick = () => confirmSheet('Delete this invite link?', "Nobody can create an account with it afterwards.", 'Delete', async () => {
+    const { error } = await sb.from('invites').delete().eq('code', b.dataset.invdel);
+    if (error) return toast("Couldn't delete it. Try again.");
+    invites.list = invites.list.filter(i => i.code !== b.dataset.invdel); render(); toast('Invite link deleted.');
+  }));
+}

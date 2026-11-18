@@ -19,7 +19,7 @@ A Tamagotchi-style pet that lives on the kilometers you run.
 - Database tables and security rules: `supabase/schema.sql` and `supabase/002_challenges.sql`. Runs are private to their owner; friends only see each other's pet (name, look, hunger, level), never individual runs. Challenges only share each member's total km inside the challenge window.
 
 ## Supabase setup (once)
-1. **SQL Editor → New query**: paste `supabase/schema.sql` and click **Run**. Then do the same with `supabase/002_challenges.sql` `supabase/003_watches.sql`, `supabase/004_coros_mcp.sql`, `supabase/005_run_buddies.sql`, `supabase/006_pack_name.sql`, `supabase/007_debug.sql`, `supabase/008_pack_chat.sql` and `supabase/009_condition.sql`.
+1. **SQL Editor → New query**: paste `supabase/schema.sql` and click **Run**. Then do the same with `supabase/002_challenges.sql` `supabase/003_watches.sql`, `supabase/004_coros_mcp.sql`, `supabase/005_run_buddies.sql`, `supabase/006_pack_name.sql`, `supabase/007_debug.sql`, `supabase/008_pack_chat.sql`, `supabase/009_condition.sql` and `supabase/010_invites.sql` (invite-only sign-up: see the comments at the top of that file for making yourself an admin).
 2. **Authentication → URL Configuration**: set **Site URL** to your app's address (e.g. `https://runagotchi.netlify.app`) and add the same address under **Redirect URLs**.
 3. Optional while testing: **Authentication → Sign In / Providers → Email** → turn off **Confirm email**, so sign-ups don't need the confirmation mail. Supabase's built-in mail server only sends a few emails per hour.
 
