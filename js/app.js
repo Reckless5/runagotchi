@@ -1,4 +1,11 @@
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
+import { petImage, has3D, shapeOf, SHAPES3D } from './pet3d.js';
+import { createGarden } from './garden3d.js';
+/* 3D pets (falls back to flat drawings when the phone has no 3D support) */
+const USE3D = (() => { try { return has3D(); } catch (e) { return false; } })();
+const garden = createGarden();
+const pet3dSpec = p => ({ shape: p.shape, color: COLORS[p.color] || COLORS.tangerine, pattern: p.pattern || 'none', acc: p.acc || 'none', condition: p.condition || null });
+
 
 /* ============ config ============ */
 const FOOD_PER_KM = 10, MAX_FOOD = 100, START_FOOD = 70, GRACE_H = 72, REVIVE_KM = 5;
@@ -160,7 +167,7 @@ function shade(hex, amt) {
   return '#' + [m(r), m(g), m(b)].map(v => v.toString(16).padStart(2, '0')).join('');
 }
 function petSVG(p, mood, stage, id, run = false) {
-  const sh = SHAPES[p.shape] || SHAPES.blob;
+  const sh = SHAPES[p.shape] || SHAPES[{ sphere: 'blob', capsule: 'bean', box: 'pebble', pyramid: 'drop', donut: 'blob' }[p.shape]] || SHAPES.blob;
   const dead = mood === 'dead';
   const cond = dead ? null : (p.condition || null); // 'sick' | 'injured'
   const baseCol = COLORS[p.color] || COLORS.tangerine;
@@ -448,7 +455,7 @@ function renderAuth() {
   $('#app').innerHTML = `
     <div class="auth">
       <header class="top"><div class="brand">Run<span>agotchi</span></div></header>
-      <div class="mini">${petSVG(SAMPLE_PET, 'happy', 'grown', 'auth')}</div>
+      <div class="mini">${petHTML(SAMPLE_PET, 'happy', 'grown', 'auth')}</div>
       <div class="hero"><h1>${signup ? "You're invited!" : 'Welcome back'}</h1><p>${signup ? 'Create your account and hatch a pet that lives on the kilometers you run.' : 'A pet that lives on the kilometers you run.'}</p></div>
       <section class="card">
         ${invite ? `<div class="seg"><button data-m="login" class="${signup ? '' : 'on'}">Log in</button><button data-m="signup" class="${signup ? 'on' : ''}">Sign up</button></div>` : ''}
@@ -542,7 +549,7 @@ function renderUsername() {
 }
 
 /* ============ creator ============ */
-function newDraft() { return { name: '', shape: 'blob', color: 'tangerine', pattern: 'none', acc: 'headband', difficulty: 'normal' }; }
+function newDraft() { return { name: '', shape: USE3D ? 'sphere' : 'blob', color: 'tangerine', pattern: 'none', acc: 'headband', difficulty: 'normal' }; }
 function renderCreator(editing) {
   const d = draft;
   const chip = (group, key, label, inner) => `<button class="chip ${d[group] === key ? 'sel' : ''}" data-g="${group}" data-k="${key}">${inner || ''}${label}</button>`;
@@ -550,9 +557,9 @@ function renderCreator(editing) {
     <header class="top"><div class="brand">Run<span>agotchi</span></div>${editing ? '<button class="btn small ghost" id="cancelEdit">Cancel</button>' : (mode === 'cloud' ? `<span class="small muted">@${esc(profile.username)}</span>` : '')}</header>
     <div class="creator">
       ${editing ? '' : `<div class="hero"><h1>Hatch your pet</h1><p>It lives on the kilometers you run.</p></div>`}
-      <div class="preview">${petSVG(d, 'happy', 'grown', 'pv')}</div>
+      <div class="preview">${petHTML(d, 'happy', 'grown', 'pv')}</div>
       <div class="field"><label for="nm">Name</label><input id="nm" class="text" maxlength="16" placeholder="e.g. Sprinty" value="${esc(d.name)}" autocomplete="off"></div>
-      <div class="field"><span class="lbl">Body</span><div class="chips">${Object.entries(SHAPES).map(([k, v]) => chip('shape', k, v.label, petSVG({ ...d, shape: k, acc: 'none' }, 'content', 'grown', 'sh' + k))).join('')}</div></div>
+      <div class="field"><span class="lbl">Body</span><div class="chips">${Object.entries(USE3D ? SHAPES3D : SHAPES).map(([k, v]) => chip('shape', k, v.label, petHTML({ ...d, shape: k, acc: 'none' }, 'content', 'grown', 'sh' + k))).join('')}</div></div>
       <div class="field"><span class="lbl">Color</span><div class="chips">${Object.entries(COLORS).map(([k, v]) => `<button class="sw ${d.color === k ? 'sel' : ''}" style="background:${v}" data-g="color" data-k="${k}" aria-label="${k}"></button>`).join('')}</div></div>
       <div class="field"><span class="lbl">Pattern</span><div class="chips">${Object.entries(PATTERNS).map(([k, v]) => chip('pattern', k, v)).join('')}</div></div>
       <div class="field"><span class="lbl">Accessory</span><div class="chips">${Object.entries(ACCS).map(([k, v]) => chip('acc', k, v)).join('')}</div></div>
@@ -636,7 +643,7 @@ function renderPet() {
     <div class="device">
       <div class="screen ${mood === 'dead' ? 'dead' : ''}" id="screen">
         <div class="lv">LV ${lvl} · ${stage.toUpperCase()}</div><div class="clock">${devOffset ? '⏩ ' : ''}${clock}</div>
-        ${gardenRoom(tNowHour(), petSVG(p, mood, stage, 'main'), mood, p.condition || '', stage)}
+        ${USE3D && garden.ok ? '<div class="g3d" id="g3d"><div class="emote3d" id="emote3d"></div></div>' : gardenRoom(tNowHour(), petSVG(p, mood, stage, 'main'), mood, p.condition || '', stage)}
         <div class="glass"></div>
       </div>
       ${bar(sim.f)}
@@ -695,6 +702,11 @@ function renderPet() {
   const sd = document.querySelector('details.settings');
   if (sd) sd.addEventListener('toggle', () => { settingsOpen = sd.open; });
   $('#addRun').onclick = openAddRun;
+  if ($('#g3d')) {
+    const hour = tNowHour(), tod = hour >= 21 || hour < 6 ? 'night' : hour >= 18 ? 'dusk' : hour < 8 ? 'dawn' : 'day';
+    garden.info = { mood, cond: p.condition || '', night: tod === 'night' };
+    if (!garden.attach($('#g3d'), { pet: pet3dSpec(p), mood, stage, tod })) render();   // no 3D after all → flat garden
+  } else garden.detach();
   bindTilt();
   document.querySelectorAll('[data-cond]').forEach(b => b.onclick = () => setCondition(b.dataset.cond || null));
   document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
@@ -707,7 +719,7 @@ function renderPet() {
   bindIncoming();
   bindDebug();
   if ($('#moreRuns')) $('#moreRuns').onclick = () => { showAllRuns = !showAllRuns; render(); };
-  $('#editPet').onclick = () => { draft = { ...S.pet }; render(); window.scrollTo(0, 0); };
+  $('#editPet').onclick = () => { draft = { ...S.pet }; if (USE3D) draft.shape = shapeOf(draft.shape); render(); window.scrollTo(0, 0); };
   document.querySelectorAll('[data-tm]').forEach(b => b.onclick = () => {
     const h = +b.dataset.tm; devOffset = h ? devOffset + h * H : 0; render();
     const d = document.querySelector('details.settings'); if (d) d.open = true;
@@ -776,7 +788,7 @@ function renderFriends() {
       <div class="st muted">Hasn't hatched a pet.</div><button class="more" data-unf="${row.id}" aria-label="Remove friend">⋯</button></div>`;
     const sim = simulateSnapshot(pet, t), mood = moodOf(sim), st = friendStatus(sim, pet);
     return `<div class="fcard">
-      <div class="scr ${mood === 'dead' ? 'dead' : ''}">${petSVG(pet, mood, pet.stage, 'f' + id.slice(0, 8))}</div>
+      <div class="scr ${mood === 'dead' ? 'dead' : ''}">${petHTML(pet, mood, pet.stage, 'f' + id.slice(0, 8))}</div>
       <div class="lv">LV ${pet.level}</div>
       <button class="more" data-unf="${row.id}" aria-label="Remove friend">⋯</button>
       <div class="nm">${esc(pet.name)}</div>
@@ -966,7 +978,7 @@ function renderRun() {
   // The cart rolls as long as at least one runner (not fainted or starved) is healthy.
   const pullers = riders.length ? list.map((x, i) => i).filter(i => !['dead', 'fainting'].includes(list[i].mood)) : [];
   const cartHtml = riders.length ? `<div class="cart ${pullers.length ? '' : 'parked'}" style="left:${cartX}%;width:${cartW}px;--rw:${riderW}px">
-      <div class="riders">${riders.map(x => `<div class="rider">${petSVG(x.pet, x.mood, x.stage, 'c' + x.key.slice(0, 8))}</div>`).join('')}</div>
+      <div class="riders">${riders.map(x => `<div class="rider">${petHTML(x.pet, x.mood, x.stage, 'c' + x.key.slice(0, 8))}</div>`).join('')}</div>
       <div class="box"></div><div class="handle"></div><span class="hitch"></span>
       <div class="wheel w1"><i></i></div><div class="wheel w2"><i></i></div>
     </div>
@@ -979,7 +991,7 @@ function renderRun() {
     const spd = (0.75 - Math.max(0, x.strength) / 100 * 0.4).toFixed(2);
     return `<div class="runner ${x.me ? 'me' : ''} ${x.mood}" style="left:${pos(i)}%;bottom:${lane.b}px;width:${w}px;z-index:${lane.z + 10};--spd:${spd}s">
       ${x.mood !== 'dead' && x.mood !== 'fainting' && x.strength >= 70 ? '<div class="dust"><i></i><i></i><i></i></div>' : ''}
-      ${petSVG(x.pet, x.mood, x.stage, 'r' + x.key.slice(0, 8), true)}
+      ${petHTML(x.pet, x.mood, x.stage, 'r' + x.key.slice(0, 8), true)}
     </div>`;
   }).join('');
   // The friendship symbol between buddies running next to each other.
@@ -1107,7 +1119,7 @@ function avatar(id) {
   else if (friends.pets[id]) { p = friends.pets[id]; mood = moodOf(simulateSnapshot(p, Date.now())); stage = p.stage; }
   if (!p) return `<span class="av empty">${esc(unameOf(id).slice(0, 1).toUpperCase())}</span>`;
   if (mood === 'fainting') mood = 'starving';
-  return `<span class="av">${petSVG(p, mood, stage === 'baby' ? 'kid' : stage, 'av' + id.slice(0, 6) + Math.random().toString(36).slice(2, 6))}</span>`;
+  return `<span class="av">${petHTML(p, mood, stage === 'baby' ? 'kid' : stage, 'av' + id.slice(0, 6) + Math.random().toString(36).slice(2, 6))}</span>`;
 }
 function challengeCard(c) {
   const t = Date.now(), done = t >= c.end, me = profile.id, mine = myStatus(c);
@@ -1858,17 +1870,17 @@ function gardenRoom(hour, pet, mood = '', cond = '', stage = 'grown') {
    The camera is locked on the pet: the whole world is shifted by -pet (see .cam in index.html). */
 const roam = { x: 0, z: 0, y: 0, flip: 1, state: 'idle', act: null, until: 0, tx: 0, tz: 0, emote: '', walking: false, last: 0, prev: '' };
 const ROAM_SPOTS = W => ({            // where things are, measured from the layout in gardenRoom()
-  pond:  { x: 0.15 * W, z: -165, face: 0.36 * W },
-  tree:  { x: 0.28 * W, z: -205, face: 0.42 * W },
-  palm:  { x: -0.30 * W, z: -110, face: -0.46 * W },
+  pond:  { x: 0.15 * W, z: -165, face: 0.36 * W, faceZ: -165 },
+  tree:  { x: 0.28 * W, z: -205, face: 0.42 * W, faceZ: -230 },
+  palm:  { x: -0.30 * W, z: -110, face: -0.46 * W, faceZ: -140 },
   home:  { x: 0, z: 0 },
 });
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = list => { let r = Math.random() * list.reduce((n, x) => n + x[0], 0); for (const x of list) { if ((r -= x[0]) <= 0) return x[1]; } return list[0][1]; };
-function roamNext(now, W, room) {
-  const mood = room.dataset.mood, cond = room.dataset.cond, night = room.classList.contains('night');
+function roamNext(now, W, info) {
+  const { mood, cond, night } = info;
   const sp = ROAM_SPOTS(W);
-  const go = (spot, act) => { roam.tx = spot.x; roam.tz = spot.z; roam.state = 'walk'; roam.act = { ...act, face: spot.face }; roam.until = now + 30; };
+  const go = (spot, act) => { roam.tx = spot.x; roam.tz = spot.z; roam.state = 'walk'; roam.act = { ...act, face: spot.face, faceZ: spot.faceZ }; roam.until = now + 30; };
   const doNow = act => { roam.state = act.name; roam.act = act; roam.until = now + act.dur; };
   if (night || cond === 'sick') {
     // sleepy: wander back to the middle, then nap for a long time
@@ -1890,39 +1902,61 @@ function roamNext(now, W, room) {
   if (choice === 'sit') return doNow({ name: 'sit', emote: tired ? (cond === 'injured' ? '🩹' : '💭') : '', dur: rnd(8, 14) });
   return doNow({ name: 'idle', emote: '', dur: rnd(10, 18) });
 }
+function gardenInfo() {
+  const room = document.querySelector('.room');
+  if (room) return { mood: room.dataset.mood, cond: room.dataset.cond, night: room.classList.contains('night'), W: room.clientWidth || 280 };
+  if (garden.active && garden.info) return { ...garden.info, W: 280 };
+  return null;
+}
 function petTapped() {
-  const room = document.querySelector('.room'); if (!room || room.dataset.mood === 'dead') return;
+  const info = gardenInfo(); if (!info || info.mood === 'dead') return;
   const now = performance.now() / 1000;
-  roam.state = room.classList.contains('night') || room.dataset.cond === 'sick' ? 'look' : 'hop';
+  roam.state = info.night || info.cond === 'sick' ? 'look' : 'hop';
   roam.act = { name: roam.state, emote: roam.state === 'hop' ? '❤️' : '❗', dur: 1.8 }; roam.until = now + 1.8;
 }
 function roamStep(st, t) {
-  const room = st.querySelector('.room'); if (!room) return;
+  const info = gardenInfo(); if (!info) return;
+  const room = st.querySelector('.room');
   const now = t / 1000, dt = roam.last ? Math.min(0.1, now - roam.last) : 0; roam.last = now;
-  const W = room.clientWidth || 280;
+  const W = info.W;
   let emote;
-  if (room.dataset.mood === 'dead' || reducedMotion()) {
-    roam.x += (0 - roam.x) * 0.1; roam.z += (0 - roam.z) * 0.1; roam.y = 0; roam.state = 'idle'; roam.act = null; emote = '';
+  if (info.mood === 'dead' || reducedMotion()) {
+    roam.x += (0 - roam.x) * 0.1; roam.z += (0 - roam.z) * 0.1; roam.y = 0; roam.state = 'idle'; roam.act = null; emote = ''; roam.heading = 0;
   } else {
-    if (now > roam.until) roamNext(now, W, room);
+    if (now > roam.until) roamNext(now, W, info);
     emote = roam.act ? roam.act.emote : '';
-    if (roam.state === 'walk') {
+    const s0 = roam.state;
+    if (s0 === 'walk') {
       const dx = roam.tx - roam.x, dz = roam.tz - roam.z, d = Math.hypot(dx, dz);
-      const speed = room.dataset.cond === 'injured' ? 16 : room.dataset.mood === 'starving' ? 22 : 42;
-      if (d < 2) { roam.state = roam.act.name; roam.until = now + roam.act.dur; if (roam.act.face != null) roam.flip = roam.act.face < roam.x ? -1 : 1; }
-      else {
+      const speed = info.cond === 'injured' ? 16 : info.mood === 'starving' ? 22 : 42;
+      if (d < 2) {
+        roam.state = roam.act.name; roam.until = now + roam.act.dur;
+        if (roam.act.face != null) { roam.flip = roam.act.face < roam.x ? -1 : 1; roam.heading = Math.atan2(roam.act.face - roam.x, (roam.act.faceZ ?? roam.z) - roam.z); }
+        else roam.heading = 0;
+      } else {
         const k = Math.min(1, speed * dt / d); roam.x += dx * k; roam.z += dz * k;
         if (Math.abs(dx) > 1) roam.flip = dx < 0 ? -1 : 1;
+        roam.heading = Math.atan2(dx, dz);
       }
       emote = '';
-    }
+    } else if (roam.act && roam.act.face == null && Math.hypot(roam.x, roam.z) < 5) roam.heading = 0;   // at home: face the camera
     const s = roam.state;
-    roam.y = s === 'walk' ? -Math.abs(Math.sin(now * (room.dataset.cond === 'injured' ? 5 : 9))) * (room.dataset.cond === 'injured' ? 1.5 : 3)
+    roam.y = s === 'walk' ? -Math.abs(Math.sin(now * (info.cond === 'injured' ? 5 : 9))) * (info.cond === 'injured' ? 1.5 : 3)
       : s === 'hop' ? -Math.abs(Math.sin(now * 7)) * 14
-      : s === 'drink' || s === 'eat' ? (Math.sin(now * 6) > .3 ? 3 : 0)
+      : s === 'drink' || s === 'eat' ? (room ? (Math.sin(now * 6) > .3 ? 3 : 0) : 0)
       : 0;
-    if (s === 'look') roam.flip = Math.sin(now * 3) > 0 ? 1 : -1;
+    if (s === 'look') { roam.flip = Math.sin(now * 3) > 0 ? 1 : -1; roam.heading = Math.sin(now * 2) * 0.7; }
   }
+  if (garden.active && !room) {
+    const head = garden.frame(t, tilt, { x: roam.x, z: roam.z, y: roam.y, heading: roam.heading || 0, state: roam.state, slow: info.cond === 'injured' });
+    const e = document.getElementById('emote3d');
+    if (e) {
+      if (e.dataset.t !== emote) { e.dataset.t = emote; e.textContent = emote; e.classList.toggle('on', !!emote); }
+      if (head) { e.style.left = (head.x * 100).toFixed(2) + '%'; e.style.top = (head.y * 100).toFixed(2) + '%'; }
+    }
+    return;
+  }
+  if (!room) return;
   st.style.setProperty('--px', roam.x.toFixed(1)); st.style.setProperty('--pz', roam.z.toFixed(1));
   st.style.setProperty('--py', roam.y.toFixed(1)); st.style.setProperty('--flip', roam.flip);
   const cls = roam.state === 'walk' ? 'walking' : roam.state === 'sit' || roam.state === 'sleep' ? 'resting' : '';
@@ -1932,4 +1966,20 @@ function roamStep(st, t) {
     bb.dataset.sig = sig; bb.classList.toggle('walking', cls === 'walking'); bb.classList.toggle('resting', cls === 'resting');
     const e = bb.querySelector('.emote'); if (e) { e.textContent = emote; e.classList.toggle('on', !!emote); }
   }
+}
+
+
+// Any pet anywhere: a 3D picture (cached), or the flat drawing on phones without 3D support.
+function petHTML(p, mood, stage, id, run = false) {
+  if (USE3D) {
+    const spec = pet3dSpec(p);
+    if (run && mood !== 'dead' && mood !== 'fainting') {
+      const a = petImage(spec, mood, stage, { pose: 'run0', size: 120 }), b = petImage(spec, mood, stage, { pose: 'run1', size: 120 });
+      if (a && b) return `<span class="p3d run m-run"><img src="${a}" alt=""><img src="${b}" alt="" class="f2"></span>`;
+    } else {
+      const u = petImage(spec, mood, stage, { size: 160 });
+      if (u) return `<img class="p3d" src="${u}" alt="">`;
+    }
+  }
+  return petSVG(p, mood, stage, id, run);
 }

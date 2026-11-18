@@ -112,6 +112,18 @@ header.top{display:flex;align-items:center;justify-content:space-between;margin-
 .stage3d .screen .lv{left:8px}.stage3d .screen .clock{right:8px}
 .stage3d .glass{z-index:5}
 .screen .float-txt{z-index:6}
+/* 3D garden + 3D pet pictures */
+.g3d{position:absolute;inset:0;overflow:hidden;border-radius:inherit}
+.g3d canvas{display:block;width:100%;height:100%}
+.emote3d{position:absolute;transform:translate(-50%,-100%) scale(0);font-size:20px;line-height:1;background:#fff;border-radius:12px;padding:3px 6px;
+  box-shadow:0 2px 6px rgba(0,0,0,.15);transition:transform .2s;white-space:nowrap;pointer-events:none;z-index:3}
+.emote3d.on{transform:translate(-50%,-100%) scale(1)}
+img.p3d{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
+.p3d.run{position:relative;display:block;width:100%;aspect-ratio:1}
+.p3d.run img{position:absolute;inset:0;width:100%;height:100%}
+.p3d.run img.f2{animation:step2 var(--spd,.5s) steps(1) infinite}
+@keyframes step2{0%{opacity:0}50%{opacity:1}}
+.chip img.p3d{width:44px;height:44px}
 .tilthint{display:block;margin:10px auto 0;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;color:var(--muted)}
 .petname{text-align:center;margin:16px 0 2px;font-size:26px;font-weight:700;letter-spacing:-.4px}
 .status{text-align:center;color:var(--muted);font-size:15px;min-height:22px;padding:0 10px}
