@@ -51,6 +51,25 @@ header.top{display:flex;align-items:center;justify-content:space-between;margin-
 .hunger.low i.on{background:#ffe08a}
 .hunger.crit i.on{background:#ffd0d0}
 
+/* 2.5D: --tx/--ty (-1..1) come from the gyroscope, the mouse or an idle sway */
+.stage3d{--tx:0;--ty:0;position:relative;perspective:900px;padding:4px 0 18px}
+.stage3d .device{transform-style:preserve-3d;will-change:transform;
+  transform:rotateY(calc(var(--tx) * 11deg)) rotateX(calc(var(--ty) * -9deg));
+  box-shadow:inset calc(-10px - var(--tx) * 6px) calc(-16px - var(--ty) * 6px) 0 rgba(0,0,0,.08), inset calc(8px - var(--tx) * 4px) calc(10px - var(--ty) * 4px) 0 rgba(255,255,255,.25),
+    calc(var(--tx) * -14px) calc(16px + var(--ty) * -8px) 30px rgba(120,60,20,.2)}
+.stage3d .device::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:radial-gradient(38% 30% at calc(32% - var(--tx) * 14%) calc(18% - var(--ty) * 12%), rgba(255,255,255,.45), rgba(255,255,255,0) 70%)}
+.stage3d .screen{transform:translateZ(2px);box-shadow:inset 0 0 0 4px rgba(0,0,0,.12), inset calc(var(--tx) * -8px) calc(6px + var(--ty) * -8px) 14px rgba(0,0,0,.14);
+  background-position:calc(var(--tx) * -3px) calc(var(--ty) * -3px)}
+.stage3d .petlayer{position:absolute;inset:0;transform:translate(calc(var(--tx) * 9px), calc(var(--ty) * 7px))}
+.stage3d .screen .lv,.stage3d .screen .clock{transform:translate(calc(var(--tx) * 3px), calc(var(--ty) * 2px))}
+.stage3d .glass{position:absolute;inset:0;pointer-events:none;border-radius:inherit;
+  background:linear-gradient(calc(115deg + var(--tx) * 18deg), rgba(255,255,255,0) 30%, rgba(255,255,255,.22) 46%, rgba(255,255,255,0) 60%);
+  background-size:200% 200%;background-position:calc(50% - var(--tx) * 30%) calc(50% - var(--ty) * 30%)}
+.stage3d .hunger{transform:translateZ(8px)}
+.stage3d::after{content:"";position:absolute;left:50%;bottom:4px;width:60%;max-width:220px;height:16px;border-radius:50%;
+  background:radial-gradient(closest-side, rgba(120,60,20,.22), rgba(120,60,20,0));transform:translateX(calc(-50% + var(--tx) * -14px));pointer-events:none}
+.tilthint{display:block;margin:10px auto 0;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;color:var(--muted)}
 .petname{text-align:center;margin:16px 0 2px;font-size:26px;font-weight:700;letter-spacing:-.4px}
 .status{text-align:center;color:var(--muted);font-size:15px;min-height:22px;padding:0 10px}
 .status b{color:var(--ink);font-weight:600}

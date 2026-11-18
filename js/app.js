@@ -632,12 +632,16 @@ function renderPet() {
     : (sb ? `<div class="row"><span class="small muted">Saved on this device only.</span></div><div class="row" style="margin-top:6px"><button class="btn small primary" id="toAuth">Log in or sign up</button><span class="small muted">to save online and add friends</span></div>` : '');
 
   $('#app').innerHTML = `${header()}
+    <div class="stage3d" id="stage3d">
     <div class="device">
       <div class="screen ${mood === 'dead' ? 'dead' : ''}" id="screen">
         <div class="lv">LV ${lvl} · ${stage.toUpperCase()}</div><div class="clock">${devOffset ? '⏩ ' : ''}${clock}</div>
-        ${petSVG(p, mood, stage, 'main')}
+        <div class="petlayer">${petSVG(p, mood, stage, 'main')}</div>
+        <div class="glass"></div>
       </div>
       ${bar(sim.f)}
+    </div>
+    ${tilt.needsTap ? '<button class="tilthint" id="tiltOn">📱 Tilt your phone to look around</button>' : ''}
     </div>
     <div class="petname">${esc(p.name)}</div>
     <div class="status ${st.cls}">${st.html}</div>
@@ -691,6 +695,7 @@ function renderPet() {
   const sd = document.querySelector('details.settings');
   if (sd) sd.addEventListener('toggle', () => { settingsOpen = sd.open; });
   $('#addRun').onclick = openAddRun;
+  bindTilt();
   document.querySelectorAll('[data-cond]').forEach(b => b.onclick = () => setCondition(b.dataset.cond || null));
   document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
     const r = S.runs.find(x => x.id === b.dataset.del); if (!r) return;
@@ -1732,4 +1737,62 @@ function bindInvites() {
     if (error) return toast("Couldn't delete it. Try again.");
     invites.list = invites.list.filter(i => i.code !== b.dataset.invdel); render(); toast('Invite link deleted.');
   }));
+}
+
+
+/* ============ 2.5D pet view ============
+   The device tilts a few degrees and its layers shift by different amounts, which reads as depth.
+   On phones the tilt follows the gyroscope; otherwise (or until the phone allows it) a slow idle sway. */
+const tilt = {
+  x: 0, y: 0,                 // current tilt, -1..1 (x: left/right, y: up/down)
+  gx: null, gy: null,         // latest gyro target
+  baseB: null, baseG: null,   // how the phone is normally held (slowly follows the hand)
+  lastGyro: 0, running: false,
+  needsTap: typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'
+    && window.matchMedia && matchMedia('(pointer: coarse)').matches
+    && (() => { try { return localStorage.getItem('runagotchi.tilt') !== 'off'; } catch (e) { return true; } })(),
+  pointer: null,
+};
+const reducedMotion = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function onOrientation(e) {
+  if (e.beta == null || e.gamma == null) return;
+  const b = Math.max(-80, Math.min(80, e.beta)), g = Math.max(-60, Math.min(60, e.gamma));
+  if (tilt.baseB == null || performance.now() - tilt.lastGyro > 2000) { tilt.baseB = b; tilt.baseG = g; }
+  tilt.baseB += (b - tilt.baseB) * 0.006; tilt.baseG += (g - tilt.baseG) * 0.006;   // re-centres over ~10 s
+  const c = v => Math.max(-1, Math.min(1, v));
+  tilt.gx = c((g - tilt.baseG) / 18); tilt.gy = c((b - tilt.baseB) / 18);
+  tilt.lastGyro = performance.now();
+}
+function startOrientation() { window.addEventListener('deviceorientation', onOrientation); }
+if (!tilt.needsTap && typeof DeviceOrientationEvent !== 'undefined') startOrientation();
+function bindTilt() {
+  const st = $('#stage3d'); if (!st) return;
+  const on = $('#tiltOn');
+  if (on) on.onclick = async () => {
+    try {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r === 'granted') startOrientation();
+      else { try { localStorage.setItem('runagotchi.tilt', 'off'); } catch (e) {} }
+    } catch (e) {}
+    tilt.needsTap = false; on.remove();
+  };
+  // Desktop: follow the mouse while it's over the pet.
+  st.onpointermove = e => { if (e.pointerType !== 'mouse') return; const r = st.getBoundingClientRect();
+    tilt.pointer = { x: ((e.clientX - r.left) / r.width) * 2 - 1, y: ((e.clientY - r.top) / r.height) * 2 - 1 }; };
+  st.onpointerleave = () => { tilt.pointer = null; };
+  if (!tilt.running) { tilt.running = true; requestAnimationFrame(tiltFrame); }
+}
+function tiltFrame(t) {
+  const st = document.getElementById('stage3d');
+  if (!st) { tilt.running = false; return; }
+  if (!document.hidden) {
+    let tx, ty;
+    if (reducedMotion()) { tx = 0; ty = 0; }
+    else if (performance.now() - tilt.lastGyro < 1500 && tilt.gx != null) { tx = tilt.gx; ty = tilt.gy; }
+    else if (tilt.pointer) { tx = tilt.pointer.x; ty = tilt.pointer.y; }
+    else { const s = t / 1000; tx = Math.sin(s * 0.55) * 0.55 + Math.sin(s * 0.23) * 0.2; ty = Math.sin(s * 0.41 + 1.3) * 0.35; }
+    tilt.x += (tx - tilt.x) * 0.08; tilt.y += (ty - tilt.y) * 0.08;
+    st.style.setProperty('--tx', tilt.x.toFixed(3)); st.style.setProperty('--ty', tilt.y.toFixed(3));
+  }
+  requestAnimationFrame(tiltFrame);
 }
