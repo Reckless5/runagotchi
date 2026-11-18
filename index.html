@@ -61,42 +61,45 @@ header.top{display:flex;align-items:center;justify-content:space-between;margin-
   background:radial-gradient(38% 30% at calc(32% - var(--tx) * 14%) calc(18% - var(--ty) * 12%), rgba(255,255,255,.45), rgba(255,255,255,0) 70%)}
 .stage3d .screen{transform:translateZ(2px);box-shadow:inset 0 0 0 4px rgba(0,0,0,.12), inset calc(var(--tx) * -8px) calc(6px + var(--ty) * -8px) 14px rgba(0,0,0,.14);
   background-position:calc(var(--tx) * -3px) calc(var(--ty) * -3px)}
-.stage3d .petlayer{position:absolute;inset:0;transform:translate(calc(var(--tx) * 9px), calc(var(--ty) * 7px))}
-.stage3d .screen .lv,.stage3d .screen .clock{transform:translate(calc(var(--tx) * 3px), calc(var(--ty) * 2px))}
 .stage3d .glass{position:absolute;inset:0;pointer-events:none;border-radius:inherit;
   background:linear-gradient(calc(115deg + var(--tx) * 18deg), rgba(255,255,255,0) 30%, rgba(255,255,255,.22) 46%, rgba(255,255,255,0) 60%);
   background-size:200% 200%;background-position:calc(50% - var(--tx) * 30%) calc(50% - var(--ty) * 30%)}
 .stage3d .hunger{transform:translateZ(8px)}
 .stage3d::after{content:"";position:absolute;left:50%;bottom:4px;width:60%;max-width:220px;height:16px;border-radius:50%;
   background:radial-gradient(closest-side, rgba(120,60,20,.22), rgba(120,60,20,0));transform:translateX(calc(-50% + var(--tx) * -14px));pointer-events:none}
-/* garden room inside the screen: far layers shift against the tilt, near layers with it */
-.room{position:absolute;inset:0;overflow:hidden}
-.rl{position:absolute;inset:-8%;pointer-events:none}
-.rl svg.rls{width:100%;height:100%;display:block}
-.rl.sky{bottom:42%;transform:translate(calc(var(--tx) * -10px), calc(var(--ty) * -6px))}
-.rl.far{top:-8%;bottom:38%;transform:translate(calc(var(--tx) * -6px), calc(var(--ty) * -4px))}
-.rl.mid{transform:translate(calc(var(--tx) * 4px), calc(var(--ty) * 3px))}
-.rl.front{z-index:3;transform:translate(calc(var(--tx) * 16px), calc(var(--ty) * 10px))}
-.screen .petlayer{z-index:2}
-.floorbox{position:absolute;left:0;right:0;top:57%;bottom:0;perspective:180px;
-  perspective-origin:calc(50% - var(--tx) * 45%) calc(-20% - var(--ty) * 40%)}
-.floor{position:absolute;left:-60%;right:-60%;top:0;height:260%;transform-origin:50% 0;transform:rotateX(62deg);
-  background:repeating-linear-gradient(90deg,#7dd05f 0 22px,#72c656 22px 44px);box-shadow:inset 0 24px 30px -18px rgba(40,90,20,.35)}
-.floor .pond{position:absolute;left:52%;top:10%;width:26%;height:16%;border-radius:50%;
-  background:radial-gradient(60% 60% at 45% 40%,#bfeaff,#58b8f0 70%,#3a9ad8);box-shadow:0 0 0 5px #d9cba4, 0 0 0 7px #bfae84}
-.floor .path{position:absolute;left:44%;top:30%;width:12%;height:80%;border-radius:40px;background:repeating-linear-gradient(0deg,#e8d9ae 0 20px,#dccb9b 20px 24px);opacity:.9}
-.room .sk1{stop-color:#7fcaff}.room .sk2{stop-color:#dff5ff}
-.room .sun{fill:#fff3a6}.room .stars{display:none}
-.room.dawn .sk1{stop-color:#9ccaf0}.room.dawn .sk2{stop-color:#ffe2c4}
-.room.dusk .sk1{stop-color:#6d7fd6}.room.dusk .sk2{stop-color:#ffb48a}.room.dusk .sun{fill:#ffcf7a;transform:translateY(34px)}
-.room.night .sk1{stop-color:#1c2a5c}.room.night .sk2{stop-color:#4a5f9c}.room.night .stars{display:block}.room.night .sun{fill:#f4f1d8;r:9}
-.room.night .clouds{opacity:.25}
-.room.night ~ .petlayer,.room.night .far,.room.night .floorbox,.room.night .mid{filter:brightness(.72) saturate(.85)}
-.room.night ~ .rl.front{filter:brightness(.65)}
+/* garden room: one 3D world; only the camera moves (the world orbits around the pet) */
+.room{position:absolute;inset:0;overflow:hidden;perspective:420px;perspective-origin:50% 38%}
+.world{position:absolute;inset:0;transform-style:preserve-3d;transform-origin:50% 80% 0;
+  transform:rotateX(calc(var(--ty) * -6deg)) rotateY(calc(var(--tx) * 11deg))}
+.world > *{position:absolute;pointer-events:none}
+.world svg{display:block;width:100%;height:100%}
+.room{background:linear-gradient(180deg,var(--sk1) 0%,var(--sk2) 46%,#8fcf74 46%,#7cc862 60%,#77c75a 100%)}
+.room.night{background:radial-gradient(1.2px 1.2px at 20% 30%,#fff 50%,transparent) 0 0/60px 50px,radial-gradient(1px 1px at 60% 50%,#fff 50%,transparent) 0 0/80px 70px,
+  linear-gradient(180deg,var(--sk1) 0%,var(--sk2) 46%,#5f9a52 46%,#58934c 100%)}
+.room .floor{left:-250%;width:600%;top:80%;height:2600px;transform-origin:50% 0;transform:translateZ(-2200px) rotateX(90deg);
+  background:repeating-linear-gradient(90deg,#7dd05f 0 26px,#72c656 26px 52px)}
+.room .floor .pond{position:absolute;left:52.5%;top:1980px;width:7%;height:110px;border-radius:50%;
+  background:radial-gradient(60% 60% at 45% 40%,#bfeaff,#58b8f0 70%,#3a9ad8);box-shadow:0 0 0 6px #d9cba4, 0 0 0 9px #bfae84}
+.room .floor .path{position:absolute;left:49.2%;top:1700px;width:1.6%;height:520px;border-radius:30px;background:#e3d3a3}
+/* billboards: bottom edge sits on the ground line (80%), centred on --x */
+.room .bb.air{height:var(--h);align-items:flex-start}
+.room .bb{bottom:20%;left:calc(var(--x) - var(--w) / 2);width:var(--w);height:80%;transform:translateZ(var(--z));display:flex;align-items:flex-end}
+.room .bb svg{height:auto;max-height:100%}
+.room .bb.hills{height:150%}
+.room .bb.hills svg{height:30%;width:100%}
+.room .bb.petbb{height:76%}
+.room .bb.petbb svg{height:100%;margin-bottom:-9%}
+.room{--sk1:#7fcaff;--sk2:#dff5ff}
+.room .sun{fill:#fff3a6}
+.room.dawn{--sk1:#9ccaf0;--sk2:#ffe2c4}
+.room.dusk{--sk1:#6d7fd6;--sk2:#ffb48a}.room.dusk .sun{fill:#ffcf7a}.room.dusk .sunbb{--h:95%}
+.room.night{--sk1:#1c2a5c;--sk2:#4a5f9c}.room.night .sun{fill:#f4f1d8}.room.night .sunbb{--w:14%}
+.room.night .cloudbb{opacity:.25}
+.room.night .floor,.room.night .bb:not(.air){filter:brightness(.72) saturate(.85)}
 .fallflow{animation:fall 1.1s linear infinite}
-@keyframes fall{to{stroke-dashoffset:-13}}
+@keyframes fall{to{stroke-dashoffset:-15}}
 @media (prefers-reduced-motion:reduce){.fallflow{animation:none}}
-.stage3d .screen .lv,.stage3d .screen .clock{z-index:4;background:rgba(255,255,255,.72);color:var(--ink);border-radius:999px;padding:1px 7px;top:8px}
+.stage3d .screen .lv,.stage3d .screen .clock{z-index:4;background:rgba(255,255,255,.72);color:var(--ink);border-radius:999px;padding:1px 7px;top:8px;transform:none}
 .stage3d .screen .lv{left:8px}.stage3d .screen .clock{right:8px}
 .stage3d .glass{z-index:5}
 .screen .float-txt{z-index:6}

@@ -636,9 +636,7 @@ function renderPet() {
     <div class="device">
       <div class="screen ${mood === 'dead' ? 'dead' : ''}" id="screen">
         <div class="lv">LV ${lvl} · ${stage.toUpperCase()}</div><div class="clock">${devOffset ? '⏩ ' : ''}${clock}</div>
-        ${gardenRoom(tNowHour())}
-        <div class="petlayer">${petSVG(p, mood, stage, 'main')}</div>
-        <div class="rl front">${GARDEN.front}</div>
+        ${gardenRoom(tNowHour(), petSVG(p, mood, stage, 'main'))}
         <div class="glass"></div>
       </div>
       ${bar(sim.f)}
@@ -1801,48 +1799,49 @@ function tiltFrame(t) {
 
 
 /* ============ the garden inside the Tamagotchi ============
-   Layers from far to near; each one shifts by its own amount with the tilt (see .rl in index.html). */
+   A real 3D scene: everything stands at a fixed spot on one ground plane (y = ground line),
+   at its own depth (translateZ). Tilting only moves the camera, which orbits around the pet. */
 const tNowHour = () => new Date(Date.now() + (typeof devOffset === 'number' ? devOffset : 0)).getHours();
 const GARDEN = {
-  sky: `<svg class="rls" viewBox="0 0 200 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-    <defs><linearGradient id="gSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="sk1"/><stop offset="1" class="sk2"/></linearGradient></defs>
-    <rect width="200" height="120" fill="url(#gSky)"/>
-    <g class="stars" fill="#fff"><circle cx="20" cy="14" r=".9"/><circle cx="52" cy="30" r=".7"/><circle cx="88" cy="10" r="1"/><circle cx="130" cy="24" r=".8"/><circle cx="168" cy="12" r=".9"/><circle cx="186" cy="38" r=".6"/><circle cx="110" cy="42" r=".6"/></g>
-    <circle class="sun" cx="156" cy="30" r="13"/>
-    <g class="clouds" fill="#fff"><g opacity=".9"><ellipse cx="44" cy="34" rx="18" ry="7"/><ellipse cx="56" cy="30" rx="11" ry="8"/></g><g opacity=".75"><ellipse cx="112" cy="54" rx="14" ry="5"/><ellipse cx="121" cy="51" rx="8" ry="6"/></g></g>
+  sun: `<svg viewBox="0 0 40 40" aria-hidden="true"><circle class="sun" cx="20" cy="20" r="16"/></svg>`,
+  cloud: `<svg viewBox="0 0 60 24" aria-hidden="true"><g fill="#fff"><ellipse cx="26" cy="15" rx="22" ry="8"/><ellipse cx="34" cy="10" rx="13" ry="9"/><ellipse cx="18" cy="12" rx="9" ry="7"/></g></svg>`,
+  hills: `<svg viewBox="0 0 900 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0 70 Q40 30 80 52 Q120 18 165 48 Q205 26 250 46 Q290 30 340 50 Q390 22 440 48 Q490 30 540 52 Q590 20 640 46 Q690 34 740 50 Q790 24 840 46 Q870 38 900 50 V100 H0Z" fill="#9ad67e"/>
+    <path d="M0 100 Q30 66 70 78 Q140 60 200 76 Q260 62 320 74 Q400 58 470 76 Q540 62 610 74 Q690 60 760 76 Q830 64 900 72 V100Z" fill="#7cc862"/>
   </svg>`,
-  far: `<svg class="rls" viewBox="0 0 200 120" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
-    <path d="M-10 92 Q20 60 52 80 Q80 50 116 78 Q150 56 210 84 V130 H-10Z" fill="#8fcf74" class="h1"/>
-    <path d="M-10 70 Q8 40 30 44 Q44 30 52 46 L56 104 H-10Z" fill="#b99a6b" class="cliff"/>
-    <path d="M-10 70 Q8 40 30 44 Q44 30 52 46" fill="none" stroke="#6dbb52" stroke-width="7" stroke-linecap="round"/>
-    <rect x="34" y="47" width="9" height="56" rx="3" fill="#bfe9ff" class="fall"/>
-    <path d="M36 52 V100 M40 50 V98" stroke="#fff" stroke-width="1.2" stroke-dasharray="6 7" class="fallflow"/>
-    <path d="M60 104 Q100 78 140 92 Q170 80 210 96 V130 H60Z" fill="#6fbd57" class="h2"/>
-    <g class="palmfar"><path d="M168 98 Q170 80 166 66" stroke="#8a6a46" stroke-width="2.4" fill="none"/>
-      <path d="M166 66 q-12 -2 -16 6 M166 66 q12 -4 16 4 M166 66 q-6 -10 -14 -10 M166 66 q8 -10 14 -8" stroke="#3f9a45" stroke-width="3" fill="none" stroke-linecap="round"/></g>
+  cliff: `<svg viewBox="0 0 60 90" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
+    <path d="M4 90 L2 22 Q14 -4 34 4 Q48 -6 56 12 L58 90Z" fill="#b99a6b"/>
+    <path d="M2 22 Q14 -4 34 4 Q48 -6 56 12" fill="none" stroke="#6dbb52" stroke-width="8" stroke-linecap="round"/>
+    <rect x="30" y="8" width="11" height="82" rx="3" fill="#bfe9ff"/>
+    <path d="M33 12 V88 M38 10 V86" stroke="#fff" stroke-width="1.4" stroke-dasharray="7 8" class="fallflow"/>
   </svg>`,
-  mid: `<svg class="rls" viewBox="0 0 200 200" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
-    <g transform="translate(18 128)"><path d="M6 46 Q10 20 2 0" stroke="#8a6a46" stroke-width="5" fill="none"/>
-      <path d="M2 0 q-20 -2 -26 12 M2 0 q20 -6 28 6 M2 0 q-10 -18 -26 -16 M2 0 q12 -18 26 -12 M2 0 q0 -16 -2 -24" stroke="#36a14a" stroke-width="6" fill="none" stroke-linecap="round"/>
-      <circle cx="-2" cy="6" r="3.4" fill="#ffcf3f"/><circle cx="6" cy="7" r="3.2" fill="#ff8a3d"/></g>
-    <g transform="translate(176 132)"><ellipse cx="0" cy="40" rx="14" ry="3" fill="rgba(0,60,0,.18)"/><rect x="-3" y="10" width="6" height="30" rx="2" fill="#8a6a46"/>
-      <circle cx="0" cy="2" r="17" fill="#4fb35b"/><circle cx="-9" cy="10" r="11" fill="#45a852"/><circle cx="10" cy="9" r="11" fill="#5cc067"/>
-      <circle cx="-6" cy="0" r="3" fill="#ff6b6b"/><circle cx="7" cy="-4" r="3" fill="#ffd23f"/><circle cx="3" cy="11" r="3" fill="#ff6b6b"/></g>
-  </svg>`,
-  front: `<svg class="rls" viewBox="0 0 200 200" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
-    <g fill="#2f9a3e"><path d="M-6 204 Q2 176 8 170 Q10 186 14 204Z"/><path d="M6 204 Q16 170 26 162 Q24 184 28 204Z"/><path d="M20 204 Q28 184 36 180 Q34 194 38 204Z"/>
-      <path d="M206 204 Q198 176 192 170 Q190 186 186 204Z"/><path d="M194 204 Q184 172 176 166 Q178 186 172 204Z"/></g>
-    <g><circle cx="30" cy="178" r="4" fill="#ff7eb6"/><circle cx="30" cy="178" r="1.6" fill="#ffe36b"/>
-      <circle cx="180" cy="180" r="4" fill="#fff"/><circle cx="180" cy="180" r="1.6" fill="#ffd23f"/>
-      <circle cx="12" cy="188" r="3.2" fill="#8fd0ff"/><circle cx="12" cy="188" r="1.3" fill="#fff"/></g>
-  </svg>`,
+  palm: `<svg viewBox="0 0 60 80" preserveAspectRatio="xMidYMax meet" aria-hidden="true"><g transform="translate(28 20)"><path d="M4 60 Q8 30 0 0" stroke="#8a6a46" stroke-width="5" fill="none"/>
+      <path d="M0 0 q-20 -2 -26 12 M0 0 q20 -6 28 6 M0 0 q-10 -18 -26 -16 M0 0 q12 -18 26 -12 M0 0 q0 -16 -2 -20" stroke="#36a14a" stroke-width="6" fill="none" stroke-linecap="round"/>
+      <circle cx="-4" cy="6" r="3.4" fill="#ffcf3f"/><circle cx="4" cy="7" r="3.2" fill="#ff8a3d"/></g></svg>`,
+  tree: `<svg viewBox="0 0 50 60" preserveAspectRatio="xMidYMax meet" aria-hidden="true"><g transform="translate(25 22)"><rect x="-3" y="8" width="6" height="30" rx="2" fill="#8a6a46"/>
+      <circle cx="0" cy="0" r="17" fill="#4fb35b"/><circle cx="-9" cy="8" r="11" fill="#45a852"/><circle cx="10" cy="7" r="11" fill="#5cc067"/>
+      <circle cx="-6" cy="-2" r="3" fill="#ff6b6b"/><circle cx="7" cy="-6" r="3" fill="#ffd23f"/><circle cx="3" cy="9" r="3" fill="#ff6b6b"/></g></svg>`,
+  tuft: (c1, c2) => `<svg viewBox="0 0 40 30" preserveAspectRatio="xMidYMax meet" aria-hidden="true"><g fill="#2f9a3e"><path d="M2 30 Q8 12 12 8 Q14 20 16 30Z"/><path d="M12 30 Q20 6 28 2 Q26 18 28 30Z"/><path d="M24 30 Q30 16 36 14 Q34 24 38 30Z"/></g>
+      <circle cx="10" cy="14" r="4" fill="${c1}"/><circle cx="10" cy="14" r="1.6" fill="${c2}"/></svg>`,
 };
-function gardenRoom(hour) {
+function gardenRoom(hour, pet) {
   const tod = hour >= 21 || hour < 6 ? 'night' : hour >= 18 ? 'dusk' : hour < 8 ? 'dawn' : 'day';
-  return `<div class="room ${tod}" aria-hidden="true">
-    <div class="rl sky">${GARDEN.sky}</div>
-    <div class="rl far">${GARDEN.far}</div>
-    <div class="floorbox"><div class="floor"><div class="pond"></div><div class="path"></div></div></div>
-    <div class="rl mid">${GARDEN.mid}</div>
-  </div>`;
+  // b = billboard standing on the ground line; x = horizontal position in % of the screen, z = depth in px (negative = further away)
+  const b = (cls, x, z, w, html) => `<div class="bb ${cls}" style="--x:${x}%;--z:${z}px;--w:${w}%">${html}</div>`;
+  // a = something in the air: same as b, but the picture hangs at the top of a column of height h (% of the screen)
+  const a = (cls, x, z, w, h, html) => `<div class="bb air ${cls}" style="--x:${x}%;--z:${z}px;--w:${w}%;--h:${h}%">${html}</div>`;
+  return `<div class="room ${tod}" aria-hidden="true"><div class="world">
+    ${a('sunbb', 68, -1100, 22, 128, GARDEN.sun)}
+    ${a('cloudbb', 30, -1000, 40, 120, GARDEN.cloud)}
+    ${a('cloudbb', 88, -800, 30, 95, GARDEN.cloud)}
+    <div class="floor"><div class="pond"></div><div class="path"></div></div>
+    ${b('hills', 50, -1100, 2000, GARDEN.hills)}
+    ${b('', 30, -700, 60, GARDEN.cliff)}
+    ${b('', 75, -560, 18, GARDEN.palm)}
+    ${b('', 4, -140, 46, GARDEN.palm)}
+    ${b('', 92, -230, 34, GARDEN.tree)}
+    ${b('petbb', 50, 0, 70, pet)}
+    ${b('', 6, 120, 22, GARDEN.tuft('#ff7eb6', '#ffe36b'))}
+    ${b('', 95, 150, 20, GARDEN.tuft('#fff', '#ffd23f'))}
+  </div></div>`;
 }
