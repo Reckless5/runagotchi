@@ -2,5 +2,6 @@
 export { Box3, BoxGeometry, BufferGeometry, CanvasTexture, CapsuleGeometry, CatmullRomCurve3, CircleGeometry, Color, ConeGeometry,
   CubicBezierCurve3, CylinderGeometry, DirectionalLight, Float32BufferAttribute, Fog, Group, HemisphereLight, Mesh, MeshBasicMaterial,
   MeshStandardMaterial, PCFSoftShadowMap, PerspectiveCamera, PlaneGeometry, Points, PointsMaterial, Raycaster, RepeatWrapping,
-  SRGBColorSpace, Scene, SphereGeometry, TorusGeometry, TubeGeometry, Vector3, WebGLRenderer } from 'three';
+  SRGBColorSpace, Scene, SphereGeometry, TorusGeometry, TubeGeometry, Vector3, WebGLRenderer,
+  MeshLambertMaterial, MeshPhongMaterial, IcosahedronGeometry, Sprite, SpriteMaterial, BackSide, DoubleSide, AdditiveBlending, Plane, Vector2 } from "three";
 export { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';

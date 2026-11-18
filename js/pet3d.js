@@ -52,7 +52,11 @@ const MATS = new Map();
 function mat(color, opts = {}) {
   const c = color instanceof THREE.Color ? color : hex(color);
   const key = c.getHexString() + JSON.stringify(opts);
-  if (!MATS.has(key)) MATS.set(key, new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, metalness: 0, ...opts }));
+  if (!MATS.has(key)) {
+    // glossy, vertex-era look: Phong with a soft highlight (roughness/metalness options are ignored)
+    const { roughness, metalness, ...rest } = opts;
+    MATS.set(key, new THREE.MeshPhongMaterial({ color: c, emissive: c.clone().multiplyScalar(0.28), shininess: roughness != null && roughness < 0.4 ? 70 : 28, specular: new THREE.Color('#3a3a3a'), ...rest }));
+  }
   return MATS.get(key);
 }
 const INK = '#2b2a22';

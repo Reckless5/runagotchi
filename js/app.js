@@ -1,9 +1,11 @@
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { petImage, has3D, shapeOf, SHAPES3D } from './pet3d.js';
 import { createGarden } from './garden3d.js';
+import { createCrew } from './crew3d.js';
 /* 3D pets (falls back to flat drawings when the phone has no 3D support) */
 const USE3D = (() => { try { return has3D(); } catch (e) { return false; } })();
 const garden = createGarden();
+const crew = createCrew();
 const pet3dSpec = p => ({ shape: p.shape, color: COLORS[p.color] || COLORS.tangerine, pattern: p.pattern || 'none', acc: p.acc || 'none', condition: p.condition || null });
 
 
@@ -1023,12 +1025,14 @@ function renderRun() {
       <span class="str"><span class="sbar"><i style="width:${Math.max(0, x.strength)}%"></i></span><span class="small ${isRider(x) ? 'cond-note' : x.strength < 15 ? 'bad' : 'muted'}">${isRider(x) ? (x.pet.condition === 'sick' ? '🤒 sick' : '🩹 injured') : label(x)}</span></span>
     </li>`;
   }).join('');
+  // 3D: the canvas draws the world, the pets and the cart; tags, bubbles and links stay HTML on top.
+  const in3D = USE3D && crew.ok;
+  const cartTagHtml = riders.length ? cartHtml.slice(cartHtml.indexOf('<div class="tag cart-tag"')) : '';
   $('#app').innerHTML = `${header()}
-    <div class="scene ${sky.night ? 'night' : ''}" style="background:${sky.bg}">
-      ${sky.orb}
-      ${sceneLayers(sky.night)}
+    <div class="scene ${sky.night ? 'night' : ''} ${in3D ? 'is3d' : ''}" style="background:${sky.bg}">
+      ${in3D ? '<div class="c3d" id="c3d"></div>' : sky.orb + sceneLayers(sky.night)}
       <button class="scene-title" id="renamePack2" aria-label="Rename your running group">${esc(packName())} <span>✏️</span></button>
-      ${N ? runnerHtml + linkHtml + tagHtml + cartHtml + bubbleHtml : ''}
+      ${N ? (in3D ? linkHtml + tagHtml + cartTagHtml + bubbleHtml : runnerHtml + linkHtml + tagHtml + cartHtml + bubbleHtml) : ''}
       ${N <= 1 ? `<div class="scene-note">${!friends.loaded && !friends.error ? 'Loading friends…' : 'Add friends to run together!'}</div>` : ''}
     </div>
     ${N ? `<form class="say" id="sayForm"><input id="say" class="text" maxlength="80" autocomplete="off" placeholder="Say something to your pack…"><button class="btn primary" id="saySend">Send</button></form>
@@ -1037,6 +1041,21 @@ function renderRun() {
     ${N ? `<section class="card"><h2><span class="packname">${esc(packName())} <button class="linkbtn rename" id="renamePack" aria-label="Rename your running group">✏️</button></span><button class="btn small ghost" id="rrefresh">${friends.loading ? 'Loading…' : 'Refresh'}</button></h2><ol class="pack">${rows}</ol>
       ${N === 1 ? `<div class="empty">Only you so far. <button class="linkbtn" id="goFriends">Add friends</button></div>` : ''}</section>` : ''}`;
   bindHeader();
+  if (in3D && $('#c3d')) {
+    const h = new Date().getHours(), tod = h >= 21 || h < 5 ? 'night' : h >= 18 ? 'dusk' : h < 8 ? 'dawn' : 'day';
+    const ok = crew.attach($('#c3d'), {
+      tod,
+      runners: list.map((x, i) => {
+        const lane = LANES[laneIdx[i] % 3];
+        return { key: x.key, pet: pet3dSpec(x.pet), mood: x.mood, stage: x.stage, xPct: pos(i), bottomPx: lane.b, widthPx: Math.round(base * lane.s),
+          spd: (0.75 - Math.max(0, x.strength) / 100 * 0.4).toFixed(2) };
+      }),
+      cart: riders.length ? { xPct: cartX, bottomPx: 18, widthPx: cartW, parked: !pullers.length,
+        riders: riders.map(x => ({ key: x.key, pet: pet3dSpec(x.pet), mood: x.mood, stage: x.stage })) } : null,
+    });
+    if (!ok) return renderRun();   // no 3D after all → flat scene
+    startCrewLoop();
+  } else crew.detach();
   if ($('#rrefresh')) $('#rrefresh').onclick = loadFriends;
   ['#renamePack', '#renamePack2'].forEach(sel => { if ($(sel)) $(sel).onclick = openRenamePack; });
   stackBubbles();
@@ -1989,4 +2008,16 @@ function petHTML(p, mood, stage, id, run = false) {
     }
   }
   return petSVG(p, mood, stage, id, run);
+}
+
+// The Crew scene's animation: 30 frames per second, only while it's on screen.
+let crewLoopOn = false, crewLast = 0;
+function startCrewLoop() {
+  if (crewLoopOn) return; crewLoopOn = true;
+  const step = t => {
+    if (!crew.active) { crewLoopOn = false; return; }
+    if (!document.hidden && t - crewLast >= 31) { crewLast = t; crew.frame(t); }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
